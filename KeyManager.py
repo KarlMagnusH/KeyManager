@@ -33,8 +33,6 @@ class KeyManager:
         self._existing_pairs: pd.DataFrame | None = None
         self._prepared = False
 
-    # ---------- Business Key Construction ----------
-
     def set_business_key(self, columns: Sequence[str]) -> "KeyManager":
         if not columns:
             raise ValueError("Must provide at least one column for business key.")
@@ -51,7 +49,6 @@ class KeyManager:
         tmp = self.df_incoming[self._bk_components].astype(str).fillna("")
         self.df_incoming[self.bk_name] = tmp.agg(BK_SEP.join, axis=1)
 
-    # ---------- Existing PK/BK Extraction ----------
 
     def _load_existing_pairs(self) -> pd.DataFrame:
         query = f"SELECT {self.pk_name}, {self.bk_name} FROM {self.table_name}"
@@ -65,7 +62,6 @@ class KeyManager:
         self._existing_pairs = df
         return df
 
-    # ---------- Conflict Checks ----------
 
     @staticmethod
     def _assert_no_bk_conflicts(df_pairs: pd.DataFrame, bk_col: str, pk_col: str) -> None:
@@ -82,7 +78,6 @@ class KeyManager:
                 f"count_conflicted={len(conflicts)}. Sample:\n{sample_rows.head(20)}"
             )
 
-    # ---------- Merge Existing Keys ----------
 
     def _left_join_existing(self) -> None:
         if self._existing_pairs is None:
@@ -99,7 +94,6 @@ class KeyManager:
         # Validate no (BK -> multi PK) conflict in the existing source itself #TODO: denne tjekker det allerede loadede. Hvis det kasteren fejl, er fejlen allerede sket. Det er ikke optimalt
         self._assert_no_bk_conflicts(self._existing_pairs, self.bk_name, self.pk_name)
 
-    # ---------- Public Lifecycle (subclasses extend) ----------
 
     def prepare(self):
         """
