@@ -2,3 +2,10 @@ import pytest
 import pandas as pd
 from ..KeyManager import KeyManager
 
+@pytest.fixture
+def sample_customer_data():
+    return pd.DataFrame({
+        "id": [1, 2, 3],
+        "name": [" alice ", "BOB", "ChArLiE "]
+    })
+
