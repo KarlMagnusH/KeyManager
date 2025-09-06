@@ -29,7 +29,7 @@ class KeyManager:
         self.df_incoming = df_incoming.copy()
         self.pk_name = pk_name or f"key_{table_name}"
         self.bk_name = bk_name or f"bk_{table_name}"
-        self._bk_components: List[str] = []
+        self._bk_cols: List[str] = []
         self._existing_pairs: pd.DataFrame | None = None
         self._prepared = False
 
@@ -39,14 +39,14 @@ class KeyManager:
         missing = [c for c in columns if c not in self.df_incoming.columns]
         if missing:
             raise ValueError(f"Business key source columns missing in incoming df: {missing}")
-        self._bk_components = list(columns)
+        self._bk_cols = list(columns)
         return self
 
     def _build_bk_column(self) -> None:
-        if not self._bk_components:
+        if not self._bk_cols:
             raise ValueError("Business key components not set. Call set_business_key().")
         # Convert to string, fill NaN with sentinel to avoid accidental collisions
-        tmp = self.df_incoming[self._bk_components].astype(str).fillna("")
+        tmp = self.df_incoming[self._bk_cols].astype(str).fillna("")
         self.df_incoming[self.bk_name] = tmp.agg(BK_SEP.join, axis=1)
 
 
