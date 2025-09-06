@@ -2,10 +2,26 @@ import pytest
 import pandas as pd
 from ..KeyManager import KeyManager
 
-@pytest.fixture
-def sample_customer_data():
-    return pd.DataFrame({
-        "id": [1, 2, 3],
-        "name": [" alice ", "BOB", "ChArLiE "]
-    })
+#Tests for KeyManager:
+def test___init__(
+        
+def test_set_business_key(self, columns: Sequence[str])
+def test__build_bk_column(self)
+def test__load_existing_pairs(self)
+def test__assert_no_bk_conflicts(df_pairs: pd.DataFrame, bk_col: str, pk_col: str)
+def test__left_join_existing(self)
+def test_prepare(self)
+def test_result(self)
 
+#Tests for KeyDimension:
+def test___init__(
+def test__assign_new_keys(self)
+def test_prepare(self)
+def test_persist(self)
+
+#Tests for KeyFact:
+def test___init__(
+def test_register_dimension(
+def test_register_all_dimension(self, *dim_names)
+def test_prepare(self)
+def test_map_dimensions(self, fail_on_missing: bool = True)
