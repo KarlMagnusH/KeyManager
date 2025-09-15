@@ -7,4 +7,4 @@ name = "KeyManager"
 version = "0.1.0"
 description = "Manages key exchanging for database and local dataframe. Builds on pandas."
 authors = [{name="xxx", email="xxx.com"}]
-dependencies = ["sqlalchemy, pandas"]
+dependencies = ["sqlalchemy", "pandas"]
