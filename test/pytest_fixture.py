@@ -1,44 +1,33 @@
-import pandas as pd
 import pytest
+from unittest.mock import Mock, MagicMock
+import pandas as pd
+from sqlalchemy.engine import Connection
 
 from TestCaseGen import TestCaseGen, BUILTINS
 
-@pytest.fixture
-def dim_person():
-    """
-    Skal teste håndtering af strings:
-    name (str), None=False
-    age (int)
+TestCase = TestCaseGen().add_dict(BUILTINS)
 
-    case hvor:
-    - name er str
-    - name er der er i forvejen
-    - name er str med initial mellemrum
-    - name er None
-    - eksisterende navn uden mellemrum
-    - name er int
-    - name er float
-    """
-    names = ["alice", "alice", " tim ", "tim", None, 1, 7.5, ]
+@pytest.fixture
+def mock_conn():
+    """Mock database connection."""
+    return Mock(spec=Connection)
+
+@pytest.fixture
+def mock_existing_pairs():
+    """Sample existing key pairs from database."""
     return pd.DataFrame({
-        "navn_str": names,
-        "alder_int": [i for i in range(len(names)+1)]
+        "key_table": [1, 2, 3],
+        "bk_table": ["alice", "bob", "charlie"]
     })
 
 @pytest.fixture
-def dim_geo():
-    ""
-    return pd.DataFrame({
-        "by_str": [" cph", "BOB", "Brons ", None, "Brons", None, "chavn",],
-        "zipcode_int": [" 142", "1415", "099 ", None, None, "Brons ", 1415,]
-    })
+def incoming_data_scenarios():
+    """Generate different incoming data scenarios."""
+    return TestCase.combine(
+        "str_case", "int_case", 
+        mode="cartesian"
+    ).get_df()
 
-@pytest.fixture
-def fact_school():
-    return pd.DataFrame({
-        "key_geo": [1, 2, 3],
-        "name": [" alice ", "BOB", "ChArLiE "]
-    })
 
 if __name__ == "__main__":
-    print(BUILTINS["str"]["mixed"])
+    print("hi")
