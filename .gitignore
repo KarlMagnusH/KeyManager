@@ -44,13 +44,13 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 
-*.mo
-*.pot
+test/
+test/helperes
 
 # Jupyter Notebook
 .ipynb_checkpoints
 
-./.venv
+.venv/
 
 # macOS
 .DS_Store
