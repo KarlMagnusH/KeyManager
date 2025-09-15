@@ -1,6 +1,8 @@
 import pandas as pd
 import pytest
 
+from TestCaseGen import TestCaseGen, BUILTINS
+
 @pytest.fixture
 def dim_person():
     """
@@ -28,7 +30,7 @@ def dim_geo():
     ""
     return pd.DataFrame({
         "by_str": [" cph", "BOB", "Brons ", None, "Brons", None, "chavn",],
-        "zipcode_int": [" 142", "1415", "099 ", None, None, , "Brons ", 1415,]
+        "zipcode_int": [" 142", "1415", "099 ", None, None, "Brons ", 1415,]
     })
 
 @pytest.fixture
@@ -38,4 +40,5 @@ def fact_school():
         "name": [" alice ", "BOB", "ChArLiE "]
     })
 
-@pytest.fixture
+if __name__ == "__main__":
+    print(BUILTINS["str"]["mixed"])
