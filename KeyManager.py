@@ -3,9 +3,7 @@ from typing import List, Sequence, Dict, Optional
 import pandas as pd
 from sqlalchemy.engine import Connection
 
-
 BK_SEP = "||"
-
 
 class KeyManager:
     """
@@ -39,7 +37,8 @@ class KeyManager:
         missing = [c for c in columns if c not in self.df_incoming.columns]
         if missing:
             raise ValueError(f"Business key source columns missing in incoming df: {missing}")
-        self._bk_cols = list(columns)
+        self._bk_cols += [*columns]
+        
         return self
 
     def _build_bk_column(self) -> None:
@@ -77,7 +76,6 @@ class KeyManager:
                 f"Conflict: BKs map to multiple PKs. bk_col={bk_col}, pk_col={pk_col}, "
                 f"count_conflicted={len(conflicts)}. Sample:\n{sample_rows.head(20)}"
             )
-
 
     def _left_join_existing(self) -> None:
         if self._existing_pairs is None:
@@ -206,11 +204,16 @@ class KeyFact(KeyManager):
     def register_dimension(
         self,
         dim_name: str,
-        fact_bk_col: str = f"bk_{dim_name}",
-        dim_bk_col: str = f"bk_{dim_name}",
-        dim_pk_col: str = f"pk_{dim_name}",
+        fact_bk_col: Optional[str] = None,
+        dim_bk_col: Optional[str] = None,
+        dim_pk_col: Optional[str] = None,
         required: bool = True,
     ) -> "KeyFact":
+        
+        fact_bk_col = fact_bk_col or f"bk_{dim_name}"
+        dim_bk_col = dim_bk_col or f"bk_{dim_name}" 
+        dim_pk_col = dim_pk_col or f"pk_{dim_name}"
+
         mapping = {
             "dim_table": dim_name,
             "fact_bk_col": fact_bk_col,

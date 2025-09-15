@@ -1,9 +1,31 @@
-# test_key_manager.py
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 import pandas as pd
+from sqlalchemy.engine import Connection
 
-from KeyManager import KeyManager, KeyDimension, KeyFact
+from KeyManager import KeyManager, KeyDimension
+from TestCaseGen import TestCaseGen, BUILTINS
+
+test_data = TestCaseGen().add_dict(BUILTINS)
+
+@pytest.fixture
+def mock_conn():
+    """Mock database connection."""
+    return Mock(spec=Connection)
+
+@pytest.fixture
+def mock_read_sql():
+    """Mock for pandas.read_sql function."""
+    return Mock()
+
+@pytest.fixture
+def mock_existing_pairs():
+    """Sample existing key pairs from database."""
+    return pd.DataFrame({
+        "key_users": [1, 2, 3],
+        "bk_users": ["alice", "bob", "charlie"]
+    })
+
 
 class TestKeyManager:
     
@@ -33,21 +55,32 @@ class TestKeyManager:
         with pytest.raises(ValueError, match="missing in incoming df"):
             km.set_business_key(["name", "missing_col"])
     
+
     @patch('pandas.read_sql')
     def test_load_existing_pairs(self, mock_read_sql, mock_conn, mock_existing_pairs):
         """Test loading existing key pairs from database."""
-        mock_read_sql.return_value = mock_existing_pairs
+        df = pd.DataFrame({"name": ["alice"]})
+        km = KeyManager("users", mock_conn, df)
+                
+        with patch('pandas.read_sql', return_value=mock_existing_pairs) as mock_read_sql:
+            result = km._load_existing_pairs()
+            
+            mock_read_sql.assert_called_once_with(
+                "SELECT key_users, bk_users FROM users", 
+                mock_conn
+            )
+            pd.testing.assert_frame_equal(result, mock_existing_pairs)
+    
+    @patch('pandas.read_sql')
+    def test_load_existing_pairs_missing_table(self, mock_read_sql, mock_conn):
+        """Test error when database table doesn't exist."""
+        mock_read_sql.side_effect = KeyError("Table 'users' doesn't exist")
         df = pd.DataFrame({"name": ["alice"]})
         km = KeyManager("users", mock_conn, df)
         
-        result = km._load_existing_pairs()
-        
-        mock_read_sql.assert_called_once_with(
-            "SELECT key_users, bk_users FROM users", 
-            mock_conn
-        )
-        pd.testing.assert_frame_equal(result, mock_existing_pairs)
-    
+        with pytest.raises(KeyError, match="Table 'users' doesn't exist"):
+            km._load_existing_pairs()
+
     def test_build_bk_column(self, mock_conn):
         """Test business key column construction."""
         df = pd.DataFrame({
@@ -62,10 +95,9 @@ class TestKeyManager:
         expected_bks = ["alice||25", "bob||"]
         assert km.df_incoming["bk_users"].tolist() == expected_bks
 
-    @pytest.mark.parametrize(
-        "name,age", 
-        test_data.combine("str_case", "int_case").to_pytest_params()
-    )
+
+
+    @pytest.mark.parametrize("name,age", test_data.combine("str_normal", "int_normal").get_tuple())
     def test_bk_construction_scenarios(self, mock_conn, name, age):
         """Test BK construction with various data types."""
         df = pd.DataFrame({"name": [name], "age": [age]})
@@ -74,7 +106,7 @@ class TestKeyManager:
         
         km._build_bk_column()
         
-        # Verify BK was created (specific assertions depend on your logic)
+        # Verify BK was created
         assert "bk_test" in km.df_incoming.columns
     
     def test_prepare_full_workflow(self, mock_conn, mock_existing_pairs):
