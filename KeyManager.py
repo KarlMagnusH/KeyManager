@@ -5,6 +5,25 @@ from sqlalchemy.engine import Connection
 
 BK_SEP = "||"
 
+#TODO: pk er reelt surrogate nøgle
+#TODO: find en bedre løsning for alle de astype kald - ligner lort og bliver gjort på data der ligger i en db 
+#TODO: df_incoming bliver overskrevet - bør assignes til ny instansvariabel
+ 
+def set_business_key(df_incoming: pd.DataFrame, *columns: str, table_name: str = None, bk_name: str = None):
+    "Constructs and set the buinesskey"
+    # TODO: Der manglere en error for hvis hverken table_name eller bk_name bliver givet
+    if bk_name is None:
+        bk_name = f"bk_{table_name}"
+
+    if not columns:
+        raise ValueError("Must provide at least one column for business key.")
+    columns_missing = [c for c in columns if c not in df_incoming.columns]
+    if columns_missing:
+        raise ValueError(f"Business key source columns missing in incoming df: {columns_missing}")
+    df_bk_cols_as_string = df_incoming[columns].astype(str).fillna("")
+    df_incoming[bk_name] = df_bk_cols_as_string.agg(BK_SEP.join, axis=1)
+    return df_incoming[bk_name] #TODO: Bør denne retunere en df eller kolonne? (find ud af når den bruges)
+
 class KeyManager:
     """
     Base class for key handling.
@@ -24,101 +43,60 @@ class KeyManager:
     ):
         self.table_name = table_name
         self.conn = conn
-        self.df_incoming = df_incoming.copy()
+        self.df_incoming = df_incoming.copy() #TODO: Bør jeg lade være på med at ændre på denne og i stedet lave en ny instansvariabel, når jeg ændre på denne første gang?
         self.pk_name = pk_name or f"key_{table_name}"
         self.bk_name = bk_name or f"bk_{table_name}"
-        self._bk_cols: List[str] = []
-        self._existing_pairs: pd.DataFrame | None = None
+        self._length_incoming_df = len(df_incoming)
         self._prepared = False
-
-    def set_business_key(self, columns: Sequence[str]) -> "KeyManager":
-        if not columns:
-            raise ValueError("Must provide at least one column for business key.")
-        missing = [c for c in columns if c not in self.df_incoming.columns]
-        if missing:
-            raise ValueError(f"Business key source columns missing in incoming df: {missing}")
-        self._bk_cols += [*columns]
-        
-        return self
-
-    def _build_bk_column(self) -> None:
-        if not self._bk_cols:
-            raise ValueError("Business key components not set. Call set_business_key().")
-        # Convert to string, fill NaN with sentinel to avoid accidental collisions
-        tmp = self.df_incoming[self._bk_cols].astype(str).fillna("")
-        self.df_incoming[self.bk_name] = tmp.agg(BK_SEP.join, axis=1)
-
-
-    def _load_existing_pairs(self) -> pd.DataFrame:
-        query = f"SELECT {self.pk_name}, {self.bk_name} FROM {self.table_name}"
-        try:
-            df = pd.read_sql(query, self.conn)
-        except Exception as e:
-            raise RuntimeError(f"Failed loading existing key pairs from {self.table_name}: {e}") from e
-        # Normalize dtypes
-        if self.bk_name in df.columns:
-            df[self.bk_name] = df[self.bk_name].astype(str)
-        self._existing_pairs = df
-        return df
-
-
-    @staticmethod
-    def _assert_no_bk_conflicts(df_pairs: pd.DataFrame, bk_col: str, pk_col: str) -> None:
-        if df_pairs.empty:
-            return
-        unique_pairs = df_pairs[[bk_col, pk_col]].dropna(subset=[bk_col, pk_col]).drop_duplicates()
-        counts = unique_pairs.groupby(bk_col, as_index=False)[pk_col].nunique()
-        conflicts = counts[counts[pk_col] > 1]
+    
+    def _assert_no_bk_conflicts(self, df_pk_bk_pair: pd.DataFrame, bk_name: str, pk_name: str) -> None:
+        if df_pk_bk_pair.empty:
+            raise ValueError(f"The dataframe for pk-pk-pairs is empty for table {self.table_name}, bk_name={bk_name}, pk_name={pk_name}")
+        unique_pairs = df_pk_bk_pair[[bk_name, pk_name]].dropna(subset=[bk_name, pk_name]).drop_duplicates()
+        counts = unique_pairs.groupby(bk_name, as_index=False)[pk_name].nunique()
+        conflicts = counts[counts[pk_name] > 1]
+    
         if not conflicts.empty:
-            sample_bks = conflicts[bk_col].tolist()[:10]
-            sample_rows = unique_pairs[unique_pairs[bk_col].isin(sample_bks)]
+            sample_bks = conflicts[bk_name].tolist()[:10]
+            sample_rows = unique_pairs[unique_pairs[bk_name].isin(sample_bks)]
             raise ValueError(
-                f"Conflict: BKs map to multiple PKs. bk_col={bk_col}, pk_col={pk_col}, "
+                f"Conflict: BKs map to multiple PKs. bk_name={bk_name}, pk_name={pk_name}, "
                 f"count_conflicted={len(conflicts)}. Sample:\n{sample_rows.head(20)}"
             )
-
-    def _left_join_existing(self) -> None:
-        if self._existing_pairs is None:
-            self._load_existing_pairs()
-        if self._existing_pairs is None or self._existing_pairs.empty:
-            self.df_incoming[self.pk_name] = pd.NA
-            return
+        
+    def update_table_with_pk_bk_pair(self, dim_table: Optional[str] = None, pk_name: Optional[str] = None, bk_name: Optional[str] = None) -> pd.DataFrame:
+        pk_name = pk_name or self.pk_name
+        bk_name = bk_name or self.bk_name  
+        dim_table = dim_table or self.table_name
+        
+        query = f"SELECT {pk_name}, {bk_name} FROM {dim_table}"
+        try:
+            df_pk_bk_pair = pd.read_sql(query, self.conn)
+        except Exception as e:
+            raise RuntimeError(f"Failed loading existing key pairs from {dim_table}: {e}") from e
+        
         self.df_incoming = self.df_incoming.merge(
-            self._existing_pairs[[self.bk_name, self.pk_name]],
-            on=self.bk_name,
+            df_pk_bk_pair[[bk_name, pk_name]],
+            on=bk_name,
             how="left",
             validate="m:1",
         )
-        # Validate no (BK -> multi PK) conflict in the existing source itself #TODO: denne tjekker det allerede loadede. Hvis det kasteren fejl, er fejlen allerede sket. Det er ikke optimalt
-        self._assert_no_bk_conflicts(self._existing_pairs, self.bk_name, self.pk_name)
-
-
-    def prepare(self):
-        """
-        Common prepare steps:
-          1. Build BK column
-          2. Load existing (PK,BK)
-          3. Join PKs onto incoming
-        Dimension subclass will extend with key generation.
-        """
-        self._build_bk_column()
-        self._load_existing_pairs()
-        self._left_join_existing()
-        self._prepared = True
+        if len(self.df_incoming) > self._length_incoming_df:
+            raise ValueError(f"row count changed after load of existing pk's.") #TODO: potentielt lave noget inteligent show a dubletter eller nye rækker
+        self._assert_no_bk_conflicts(df_pk_bk_pair, bk_name, pk_name)
         return self
 
-    def result(self) -> pd.DataFrame:
-        if not self._prepared:
-            raise RuntimeError("Call prepare() (and persist() if dimension) before accessing result().")
+    def get_modified_df(self) -> pd.DataFrame:
         return self.df_incoming.copy()
-
 
 class KeyDimension(KeyManager):
     """
     Handles surrogate key assignment for a dimension (star schema).
-    May generate new PKs for BKs not present in the dimension table.
-    Writes only NEW rows (existing BKs not re-inserted).
-    Does not implement SCD variants beyond simple Type-1 style insertion of new keys.
+    Generate new PKs for BKs not present in the dimension table.
+    Writes only NEW rows (existing BKs not re-inserted).    
+    Usage:
+        dim = KeyDimension("dim_sales", conn, df_dim)
+        dim.write_to_db()
     """
 
     def __init__(
@@ -130,50 +108,60 @@ class KeyDimension(KeyManager):
         bk_name: Optional[str] = None,
     ):
         super().__init__(table_name, conn, df_incoming, pk_name, bk_name)
+        self.update_table_with_pk_bk_pair() 
+        self._assert_no_bk_conflicts(self.df_pk_bk_pair, self.bk_name, self.pk_name)#TODO: Assert er opdelt. Bør samles til når de nye pk er lavet og hele dimensionen er i memory
+        self._assign_new_keys()
+        self._assert_no_bk_conflicts(self.df_incoming, self.bk_name, self.pk_name)
+
+    def update_table_with_pk_bk_pair(self) -> pd.DataFrame:
+        "This functions uses the instans variabels, for col names and sets a self.df_pk_bk_pair"
+        query = f"SELECT {self.pk_name}, {self.bk_name} FROM {self.table_name}"
+        try:
+            self.df_pk_bk_pair = pd.read_sql(query, self.conn)
+        except Exception as e:
+            raise RuntimeError(f"Failed loading existing key pairs from {self.table_name}: {e}") from e
+        
+        self.df_incoming = self.df_incoming.merge(
+            self.df_pk_bk_pair[[self.bk_name, self.pk_name]],
+            on=self.bk_name,
+            how="left",
+            validate="m:1",
+        )
+        return self
 
     def _assign_new_keys(self) -> None:
-        # Rows missing PK after join need new surrogate keys
+        "Assign new pk's for rows missing PK after join"
         mask_new = self.df_incoming[self.pk_name].isna()
         if not mask_new.any():
             return
         # Determine next key start
-        if self._existing_pairs is None or self._existing_pairs.empty:
+        if self.df_pk_bk_pair is None or self.df_pk_bk_pair.empty:
             current_max = 0
         else:
             # Cast to numeric safely
-            existing_pk = pd.to_numeric(self._existing_pairs[self.pk_name], errors="coerce")
-            current_max = int(existing_pk.max()) if existing_pk.notna().any() else 0
+            existing_pk = pd.to_numeric(self.df_pk_bk_pair[self.pk_name], errors="coerce")
+            if existing_pk.isna().any():
+                raise ValueError(f"{self.table_name} contains pk's ({self.pk_name}) that are null in the db")
+            current_max = int(existing_pk.max())
         needed = mask_new.sum()
         new_keys = range(current_max + 1, current_max + 1 + needed)
         self.df_incoming.loc[mask_new, self.pk_name] = list(new_keys)
         self.df_incoming[self.pk_name] = self.df_incoming[self.pk_name].astype(int)
 
-    def prepare(self):
-        super().prepare()
-        self._assign_new_keys()
-        # Re-check no BK → multiple PK after assignment
-        self._assert_no_bk_conflicts(self.df_incoming[[self.bk_name, self.pk_name]], self.bk_name, self.pk_name)
-        return self
-
-    def persist(self) -> int:
-        """
-        Insert only genuinely new (BK) records into the dimension table.
-        Uses INSERT ... (no update). Caller should ensure uniqueness constraint on bk column in DB.
-        Returns number of inserted rows.
-        """
-        if not self._prepared:
-            raise RuntimeError("Call prepare() before persist().")
-        # Identify BKs already existing
-        existing_bks = set() if self._existing_pairs is None else set(self._existing_pairs[self.bk_name])
-        to_insert = self.df_incoming[~self.df_incoming[self.bk_name].isin(existing_bks)].copy()
-        if to_insert.empty:
-            return 0
-        # Only write new PK + BK (and optionally natural columns—extend as needed)
-        cols_to_write = [self.pk_name, self.bk_name]
-        # Write via pandas to_sql (append). Assumes table exists.
-        to_insert[cols_to_write].to_sql(self.table_name, self.conn, if_exists="append", index=False)
-        return len(to_insert)
-
+    #def write_to_db(self) -> int:
+    #    """
+    #    Insert only genuinely new (BK) records into the dimension table.
+    #    Uses INSERT ... (no update). Caller should ensure uniqueness constraint on bk column in DB.
+    #    """
+    #    # Identify BKs already existing
+    #    existing_bks = set() if self.df_pk_bk_pair is None else set(self.df_pk_bk_pair[self.bk_name])
+    #    self.df_to_insert = self.df_incoming[~self.df_incoming[self.bk_name].isin(existing_bks)].copy()
+    #    #if self.df_to_insert.empty:
+    #    #    self.number_of_rows_inserted = 0
+    #    #    print(f"") #TODO: skulle nok være en log i stedet for print
+    #    # Write via pandas to_sql (append). Assumes table exists.
+    #    self.df_to_insert.to_sql(self.table_name, self.conn, if_exists="append", index=False)
+    #    #self.number_of_rows_inserted = len(self.df_to_insert) #TODO: Ville der være noget fint i at logge antallet afrækker der bliver skrevet?
 
 class KeyFact(KeyManager):
     """
@@ -182,92 +170,76 @@ class KeyFact(KeyManager):
     Usage:
         fact = KeyFact("fact_sales", conn, df_fact)
         fact.register_dimension(
-            dim_table="dim_product",
-            fact_bk_col="bk_product",
-            dim_bk_col="bk_dim_product",
-            dim_pk_col="key_dim_product"
+            dim_table="dim_table",
+            pk_name="pk_name",
+            bk_name="bk_name"
         )
-        fact.prepare()  # builds its own BK if configured or skips
-        fact.map_dimensions()
-        df_ready = fact.result()
-    """
+        fact.import_dimension_keys()
+        fact.write_to_db()
+        """
 
     def __init__(
         self,
         table_name: str,
         conn: Connection,
         df_incoming: pd.DataFrame,
+        pk_name: Optional[str] = None,
+        bk_name: Optional[str] = None,
     ):
-        super().__init__(table_name, conn, df_incoming, pk_name=None, bk_name=None)
-        self._dim_mappings: List[Dict[str, str]] = []
+        super().__init__(table_name, conn, df_incoming, pk_name, bk_name)
+        self.dim_mappings: Dict[str, Dict[str, str]] = {}
 
     def register_dimension(
         self,
         dim_name: str,
-        fact_bk_col: Optional[str] = None,
-        dim_bk_col: Optional[str] = None,
-        dim_pk_col: Optional[str] = None,
-        required: bool = True,
+        bk_name: Optional[str] = None,
+        pk_name: Optional[str] = None,
     ) -> "KeyFact":
         
-        fact_bk_col = fact_bk_col or f"bk_{dim_name}"
-        dim_bk_col = dim_bk_col or f"bk_{dim_name}" 
-        dim_pk_col = dim_pk_col or f"pk_{dim_name}"
+        bk_name = bk_name or f"bk_{dim_name}" 
+        pk_name = pk_name or f"pk_{dim_name}"
 
-        mapping = {
+        # Fix: Direct assignment instead of .update()
+        self.dim_mappings[dim_name] = {
             "dim_table": dim_name,
-            "fact_bk_col": fact_bk_col,
-            "dim_bk_col": dim_bk_col,
-            "dim_pk_col": dim_pk_col,
-            "required": required,
+            "bk_name": bk_name,
+            "pk_name": pk_name,
         }
-        self._dim_mappings.append(mapping)
         return self
 
-    def register_all_dimension(self, *dim_names):
+    def register_all_dimensions(self, *dim_names):
         for dim_name in dim_names:
-            self.register_dimensions(dim_name)
-
-    def prepare(self):
-        # Fact may not have its own single BK like dimensions; skip parent BK logic.
-        if not self._dim_mappings:
-            raise RuntimeError(f"Reference til dimension is missing. Call register_all_dimension() or register_dimension() for single refereance")
-        self._prepared = True
+            self.register_dimension(dim_name=dim_name)
         return self
-
-    def map_dimensions(self, fail_on_missing: bool = True):
-        if not self._prepared:
-            raise RuntimeError("Call prepare() first.")
-        for m in self._dim_mappings:
-            for col in [m["fact_bk_col"]]:
-                if col not in self.df_incoming.columns:
-                    raise ValueError(f"Fact BK column '{col}' missing in incoming dataframe.")
-            # Load dimension slice
-            query = f"SELECT {m['dim_pk_col']}, {m['dim_bk_col']} FROM {m['dim_table']}"
-            dim_df = pd.read_sql(query, self.conn)
-            dim_df[m["dim_bk_col"]] = dim_df[m["dim_bk_col"]].astype(str) #TODO: redundant siden det kommer fra en database?
-            # Coerce fact BK col to string for reliable join
-            self.df_incoming[m["fact_bk_col"]] = self.df_incoming[m["fact_bk_col"]].astype(str)
-            before = len(self.df_incoming)
-            self.df_incoming = self.df_incoming.merge(
-                dim_df,
-                left_on=m["fact_bk_col"],
-                right_on=m["dim_bk_col"],
-                how="left",
-                validate="m:1",
-            )
-            assert len(self.df_incoming) == before, "Unexpected row explosion during dimension join."
-            # Rename PK into fact namespace
-            pk_target_name = m["dim_pk_col"]
-            # Drop redundant BK from dimension side
-            self.df_incoming.drop(columns=[m["dim_bk_col"]], inplace=True) #TODO: Skal rykkes ud og gøres samlet for hele facten
-            # Optionally enforce all matched
-            if fail_on_missing or m["required"]:
-                missing = self.df_incoming[pk_target_name].isna().sum()
-                if missing:
-                    sample = self.df_incoming[self.df_incoming[pk_target_name].isna()][m["fact_bk_col"]].head(15)
+    
+    def import_dimension_keys(self, fail_on_missing: bool = True):
+        if not self.dim_mappings:
+            raise RuntimeError("Reference til dimension is missing. Call register_all_dimension() or register_dimension() for single reference")
+        
+        for dim_name, m in self.dim_mappings.items():
+            if m["bk_name"] not in self.df_incoming.columns:
+                raise ValueError(f"Fact BK column '{m['bk_name']}' missing in incoming dataframe.")
+            
+            self.update_table_with_pk_bk_pair(**m)
+            
+            if fail_on_missing:
+                missing_mask = self.df_incoming[m["pk_name"]].isna()
+                missing_count = missing_mask.sum()
+                if missing_count > 0:
+                    sample_bks = self.df_incoming[missing_mask][m["bk_name"]].head(10)
                     raise ValueError(
-                        f"Missing dimension keys for {missing} rows when mapping "
-                        f"{m['fact_bk_col']} -> {pk_target_name} from {m['dim_table']}. Sample BKs:\n{sample}"
+                        f"Missing dimension keys for {missing_count} rows when mapping "
+                        f"{m['bk_name']} -> {m['pk_name']} from {m['dim_table']}. "
+                        f"Sample missing BKs:\n{sample_bks.tolist()}"
                     )
+                
+        bk_cols_to_pop = {m["bk_name"] for m in self.dim_mappings.values()}
+        self.df_incoming = self.df_incoming.drop(columns=bk_cols_to_pop, errors='ignore')
         return self
+
+    #def write_to_db(self) -> int:
+    #    """
+    #    Insert only genuinely new (BK) records into the fact table.
+    #    Uses INSERT ... (no update). Caller should ensure uniqueness constraint on bk column in DB.
+    #    """
+    #    self.df_incoming.to_sql(self.table_name, self.conn, if_exists="append", index=False)
