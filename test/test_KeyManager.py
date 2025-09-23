@@ -3,7 +3,7 @@ from unittest.mock import patch, Mock
 import pandas as pd
 from sqlalchemy.engine import Connection
 
-from KeyManager import KeyManager, KeyDimension
+from KeyManager import KeyManager, KeyDimension, KeyFact, set_business_key
 from TestCaseGen import TestCaseGen, BUILTINS
 
 test_data = TestCaseGen().add_dict(BUILTINS)
@@ -19,13 +19,44 @@ def mock_read_sql():
     return Mock()
 
 @pytest.fixture
-def mock_existing_pairs():
-    """Sample existing key pairs from database."""
-    return pd.DataFrame({
-        "key_users": [1, 2, 3],
-        "bk_users": ["alice", "bob", "charlie"]
-    })
+def df(self):
+    """Create test DataFrame from TestCaseGen data."""
+    return test_data.combine("str_normal", "int_normal").get_df()
 
+@pytest.fixture
+def df_mixed(self):
+    """Create test DataFrame from TestCaseGen data."""
+    return test_data.combine("str_normal", "int_mixed").get_df()
+
+class TestBuisnessKey:
+
+    def test_set_buinesskey_ValueError(self, df):
+        with pytest.raises(ValueError, match="Must provide either bk_name or table_name"):
+            set_business_key(df, "str_normal", "int_normal")
+
+    def test_set_buinesskey_table_name(self, df):
+            df_result = set_business_key(df, "str_normal", "int_normal", table_name="user")
+            expected = (df["str_normal"].astype(str) + "||" + df["int_normal"].astype(str))
+            expected.name = "bk_user"
+        
+            pd.testing.assert_series_equal(df_result, expected)
+
+    def test_set_buinesskey_costum_bk_name(self, df):
+            df_result = set_business_key(df, "str_normal", "int_normal", bk_name="bk_cust")
+            expected = (df["str_normal"].astype(str) + "||" + df["int_normal"].astype(str))
+            expected.name = "bk_cust"
+        
+            pd.testing.assert_series_equal(df_result, expected)
+            assert expected.name in df_result.columns
+
+
+    def test_set_buinesskey_mixed_col(self, df_mixed):
+            df_result = set_business_key(df_mixed, "str_normal", "int_normal", table_name="user")
+            expected = (df_mixed["str_normal"].astype(str) + "||" + df_mixed["int_mixed"].astype(str))
+            expected.name = "bk_cust"
+
+            pd.testing.assert_series_equal(df_result, expected)
+            assert expected.name in df_result.columns
 
 class TestKeyManager:
     
