@@ -4,14 +4,18 @@ import pandas as pd
 from sqlalchemy.engine import Connection
 
 BK_SEP = "||"
+DEFAULT_PK_PREFIX = "key" #TODO
+DEFAULT_BK_PREFIX = "bk" #TODO
+MAX_SAMPLE_CONFLICTS = 10 #TODO
+MAX_SAMPLE_ROWS = 20 #TODO
 
 #TODO: pk er reelt surrogate nøgle
 #TODO: find en bedre løsning for alle de astype kald - ligner lort og bliver gjort på data der ligger i en db 
 #TODO: df_incoming bliver overskrevet - bør assignes til ny instansvariabel
  
-def set_business_key(df_incoming: pd.DataFrame, *columns: str, table_name: str = None, bk_name: str = None):
-    "Constructs and set the buinesskey"
-    # TODO: Der manglere en error for hvis hverken table_name eller bk_name bliver givet
+def set_business_key(df_incoming: pd.DataFrame, *columns: str, table_name: Optional[str] = None, bk_name: Optional[str] = None):
+    if bk_name is None and table_name is None:
+        raise ValueError("Must provide either bk_name or table_name")
     if bk_name is None:
         bk_name = f"bk_{table_name}"
 
@@ -47,11 +51,13 @@ class KeyManager:
         self.pk_name = pk_name or f"key_{table_name}"
         self.bk_name = bk_name or f"bk_{table_name}"
         self._length_incoming_df = len(df_incoming)
-        self._prepared = False
     
     def _assert_no_bk_conflicts(self, df_pk_bk_pair: pd.DataFrame, bk_name: str, pk_name: str) -> None:
         if df_pk_bk_pair.empty:
-            raise ValueError(f"The dataframe for pk-pk-pairs is empty for table {self.table_name}, bk_name={bk_name}, pk_name={pk_name}")
+            raise ValueError(
+                f"No existing key pairs found for table '{self.table_name}'. "
+                f"Expected columns: {bk_name}, {pk_name}"
+            )
         unique_pairs = df_pk_bk_pair[[bk_name, pk_name]].dropna(subset=[bk_name, pk_name]).drop_duplicates()
         counts = unique_pairs.groupby(bk_name, as_index=False)[pk_name].nunique()
         conflicts = counts[counts[pk_name] > 1]
@@ -64,7 +70,7 @@ class KeyManager:
                 f"count_conflicted={len(conflicts)}. Sample:\n{sample_rows.head(20)}"
             )
         
-    def update_table_with_pk_bk_pair(self, dim_table: Optional[str] = None, pk_name: Optional[str] = None, bk_name: Optional[str] = None) -> pd.DataFrame:
+    def load_and_merge_dimension_keys(self, dim_table: Optional[str] = None, pk_name: Optional[str] = None, bk_name: Optional[str] = None) -> "KeyManager":
         pk_name = pk_name or self.pk_name
         bk_name = bk_name or self.bk_name  
         dim_table = dim_table or self.table_name
@@ -91,7 +97,6 @@ class KeyManager:
 
 class KeyDimension(KeyManager):
     """
-    Handles surrogate key assignment for a dimension (star schema).
     Generate new PKs for BKs not present in the dimension table.
     Writes only NEW rows (existing BKs not re-inserted).    
     Usage:
@@ -108,12 +113,12 @@ class KeyDimension(KeyManager):
         bk_name: Optional[str] = None,
     ):
         super().__init__(table_name, conn, df_incoming, pk_name, bk_name)
-        self.update_table_with_pk_bk_pair() 
+        self.load_and_merge_dimension_keys() 
         self._assert_no_bk_conflicts(self.df_pk_bk_pair, self.bk_name, self.pk_name)#TODO: Assert er opdelt. Bør samles til når de nye pk er lavet og hele dimensionen er i memory
         self._assign_new_keys()
         self._assert_no_bk_conflicts(self.df_incoming, self.bk_name, self.pk_name)
 
-    def update_table_with_pk_bk_pair(self) -> pd.DataFrame:
+    def load_and_merge_dimension_keys(self) -> pd.DataFrame:
         "This functions uses the instans variabels, for col names and sets a self.df_pk_bk_pair"
         query = f"SELECT {self.pk_name}, {self.bk_name} FROM {self.table_name}"
         try:
@@ -134,15 +139,14 @@ class KeyDimension(KeyManager):
         mask_new = self.df_incoming[self.pk_name].isna()
         if not mask_new.any():
             return
-        # Determine next key start
-        if self.df_pk_bk_pair is None or self.df_pk_bk_pair.empty:
-            current_max = 0
-        else:
-            # Cast to numeric safely
+
+        current_max = 0
+        if not self.df_pk_bk_pair.empty:
             existing_pk = pd.to_numeric(self.df_pk_bk_pair[self.pk_name], errors="coerce")
             if existing_pk.isna().any():
-                raise ValueError(f"{self.table_name} contains pk's ({self.pk_name}) that are null in the db")
+                raise ValueError(f"Table {self.table_name} contains non-numeric PKs")
             current_max = int(existing_pk.max())
+
         needed = mask_new.sum()
         new_keys = range(current_max + 1, current_max + 1 + needed)
         self.df_incoming.loc[mask_new, self.pk_name] = list(new_keys)
@@ -166,7 +170,6 @@ class KeyDimension(KeyManager):
 class KeyFact(KeyManager):
     """
     For fact tables: only replaces BK columns (one or many) with corresponding PKs from dimension tables.
-    Does NOT insert into dimension tables.
     Usage:
         fact = KeyFact("fact_sales", conn, df_fact)
         fact.register_dimension(
@@ -199,7 +202,6 @@ class KeyFact(KeyManager):
         bk_name = bk_name or f"bk_{dim_name}" 
         pk_name = pk_name or f"pk_{dim_name}"
 
-        # Fix: Direct assignment instead of .update()
         self.dim_mappings[dim_name] = {
             "dim_table": dim_name,
             "bk_name": bk_name,
@@ -220,7 +222,7 @@ class KeyFact(KeyManager):
             if m["bk_name"] not in self.df_incoming.columns:
                 raise ValueError(f"Fact BK column '{m['bk_name']}' missing in incoming dataframe.")
             
-            self.update_table_with_pk_bk_pair(**m)
+            self.load_and_merge_dimension_keys(**m)
             
             if fail_on_missing:
                 missing_mask = self.df_incoming[m["pk_name"]].isna()
