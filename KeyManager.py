@@ -4,6 +4,7 @@ import pandas as pd
 from sqlalchemy.engine import Connection
 
 BK_SEP = "||"
+DEFAULT_PK_VALUE = -1
 DEFAULT_PK_PREFIX = "key" #TODO
 DEFAULT_BK_PREFIX = "bk" #TODO
 MAX_SAMPLE_CONFLICTS = 10 #TODO
@@ -69,8 +70,9 @@ class KeyManager:
                 f"Conflict: BKs map to multiple PKs. bk_name={bk_name}, pk_name={pk_name}, "
                 f"count_conflicted={len(conflicts)}. Sample:\n{sample_rows.head(20)}"
             )
-        
-    def load_and_merge_dimension_keys(self, dim_table: Optional[str] = None, pk_name: Optional[str] = None, bk_name: Optional[str] = None) -> "KeyManager":
+    
+    def _load_existing_pairs(self, dim_table: Optional[str] = None, pk_name: Optional[str] = None, bk_name: Optional[str] = None) -> pd.DataFrame:
+        """Load existing key pairs from dimension table."""
         pk_name = pk_name or self.pk_name
         bk_name = bk_name or self.bk_name  
         dim_table = dim_table or self.table_name
@@ -81,16 +83,30 @@ class KeyManager:
         except Exception as e:
             raise RuntimeError(f"Failed loading existing key pairs from {dim_table}: {e}") from e
         
+        self._assert_no_bk_conflicts(df_pk_bk_pair, bk_name, pk_name)
+        return df_pk_bk_pair
+
+    def merge_dimension_keys(self, df_pk_bk_pair: pd.DataFrame, bk_name: Optional[str] = None, pk_name: Optional[str] = None) -> "KeyManager":
+        """Merge dimension keys into incoming dataframe."""
+        bk_name = bk_name or self.bk_name
+        pk_name = pk_name or self.pk_name
+        
         self.df_incoming = self.df_incoming.merge(
             df_pk_bk_pair[[bk_name, pk_name]],
             on=bk_name,
             how="left",
             validate="m:1",
         )
+        
         if len(self.df_incoming) > self._length_incoming_df:
-            raise ValueError(f"row count changed after load of existing pk's.") #TODO: potentielt lave noget inteligent show a dubletter eller nye rækker
-        self._assert_no_bk_conflicts(df_pk_bk_pair, bk_name, pk_name)
+            raise ValueError(f"Row count changed after merge - possible duplicate keys")
+        
         return self
+
+    def load_and_merge_dimension_keys(self, dim_table: Optional[str] = None, pk_name: Optional[str] = None, bk_name: Optional[str] = None) -> "KeyManager":
+        """Convenience method that combines loading and merging."""
+        df_pk_bk_pair = self._load_existing_pairs(dim_table, pk_name, bk_name)
+        return self.merge_dimension_keys(df_pk_bk_pair, bk_name, pk_name)
 
     def get_modified_df(self) -> pd.DataFrame:
         return self.df_incoming.copy()
@@ -113,26 +129,10 @@ class KeyDimension(KeyManager):
         bk_name: Optional[str] = None,
     ):
         super().__init__(table_name, conn, df_incoming, pk_name, bk_name)
-        self.load_and_merge_dimension_keys() 
-        self._assert_no_bk_conflicts(self.df_pk_bk_pair, self.bk_name, self.pk_name)#TODO: Assert er opdelt. Bør samles til når de nye pk er lavet og hele dimensionen er i memory
+        self.df_pk_bk_pair = self._load_existing_pairs()
+        self.merge_dimension_keys(self.df_pk_bk_pair)
         self._assign_new_keys()
         self._assert_no_bk_conflicts(self.df_incoming, self.bk_name, self.pk_name)
-
-    def load_and_merge_dimension_keys(self) -> pd.DataFrame:
-        "This functions uses the instans variabels, for col names and sets a self.df_pk_bk_pair"
-        query = f"SELECT {self.pk_name}, {self.bk_name} FROM {self.table_name}"
-        try:
-            self.df_pk_bk_pair = pd.read_sql(query, self.conn)
-        except Exception as e:
-            raise RuntimeError(f"Failed loading existing key pairs from {self.table_name}: {e}") from e
-        
-        self.df_incoming = self.df_incoming.merge(
-            self.df_pk_bk_pair[[self.bk_name, self.pk_name]],
-            on=self.bk_name,
-            how="left",
-            validate="m:1",
-        )
-        return self
 
     def _assign_new_keys(self) -> None:
         "Assign new pk's for rows missing PK after join"
@@ -216,24 +216,30 @@ class KeyFact(KeyManager):
     
     def import_dimension_keys(self, fail_on_missing: bool = True):
         if not self.dim_mappings:
-            raise RuntimeError("Reference til dimension is missing. Call register_all_dimension() or register_dimension() for single reference")
+            raise RuntimeError("Reference til dimension is missing...")
         
         for dim_name, m in self.dim_mappings.items():
             if m["bk_name"] not in self.df_incoming.columns:
                 raise ValueError(f"Fact BK column '{m['bk_name']}' missing in incoming dataframe.")
             
-            self.load_and_merge_dimension_keys(**m)
+            df_pairs = self._load_existing_pairs(
+                dim_table=m["dim_table"],
+                pk_name=m["pk_name"], 
+                bk_name=m["bk_name"]
+            )
+            self.merge_dimension_keys(df_pairs, m["bk_name"], m["pk_name"])
             
-            if fail_on_missing:
-                missing_mask = self.df_incoming[m["pk_name"]].isna()
-                missing_count = missing_mask.sum()
-                if missing_count > 0:
-                    sample_bks = self.df_incoming[missing_mask][m["bk_name"]].head(10)
-                    raise ValueError(
-                        f"Missing dimension keys for {missing_count} rows when mapping "
-                        f"{m['bk_name']} -> {m['pk_name']} from {m['dim_table']}. "
-                        f"Sample missing BKs:\n{sample_bks.tolist()}"
+            missing_mask = self.df_incoming[m["pk_name"]].isna()
+            missing_count = missing_mask.sum()
+            if fail_on_missing and missing_count > 0:
+                sample_bks = self.df_incoming[missing_mask][m["bk_name"]].head(10)
+                raise ValueError(
+                    f"Missing dimension keys for {missing_count} rows when mapping "
+                    f"{m['bk_name']} -> {m['pk_name']} from {m['dim_table']}. "
+                    f"Sample missing BKs:\n{sample_bks.tolist()}"
                     )
+            else:
+                self.df_incoming.loc[missing_mask, m['pk_name']] = DEFAULT_PK_VALUE
                 
         bk_cols_to_pop = {m["bk_name"] for m in self.dim_mappings.values()}
         self.df_incoming = self.df_incoming.drop(columns=bk_cols_to_pop, errors='ignore')
