@@ -53,10 +53,11 @@ class KeyManager:
         self.bk_name = bk_name or f"bk_{table_name}"
         self._length_incoming_df = len(df_incoming)
     
-    def _assert_no_bk_conflicts(self, df_pk_bk_pair: pd.DataFrame, bk_name: str, pk_name: str) -> None:
+    def _assert_no_bk_conflicts(self, df_pk_bk_pair: pd.DataFrame, bk_name: str, pk_name: str, dim_table: str=None) -> None:
         if df_pk_bk_pair.empty:
+            dim_table = dim_table or self.table_name
             raise ValueError(
-                f"No existing key pairs found for table '{self.table_name}'. "
+                f"No existing key pairs found for table '{dim_table}'. "
                 f"Expected columns: {bk_name}, {pk_name}"
             )
         unique_pairs = df_pk_bk_pair[[bk_name, pk_name]].dropna(subset=[bk_name, pk_name]).drop_duplicates()
@@ -73,8 +74,8 @@ class KeyManager:
     
     def _load_existing_pairs(self, dim_table: Optional[str] = None, pk_name: Optional[str] = None, bk_name: Optional[str] = None) -> pd.DataFrame:
         """Load existing key pairs from dimension table."""
-        pk_name = pk_name or self.pk_name
         bk_name = bk_name or self.bk_name  
+        pk_name = pk_name or self.pk_name
         dim_table = dim_table or self.table_name
         
         query = f"SELECT {pk_name}, {bk_name} FROM {dim_table}"
@@ -83,7 +84,7 @@ class KeyManager:
         except Exception as e:
             raise RuntimeError(f"Failed loading existing key pairs from {dim_table}: {e}") from e
         
-        self._assert_no_bk_conflicts(df_pk_bk_pair, bk_name, pk_name)
+        self._assert_no_bk_conflicts(df_pk_bk_pair, bk_name, pk_name, dim_table)
         return df_pk_bk_pair
 
     def merge_dimension_keys(self, df_pk_bk_pair: pd.DataFrame, bk_name: Optional[str] = None, pk_name: Optional[str] = None) -> "KeyManager":
