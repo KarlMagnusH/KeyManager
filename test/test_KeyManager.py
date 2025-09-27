@@ -45,33 +45,33 @@ def df_3_cols_str_none_zipped():
 
 class TestBuisnessKey:
 
-    def test_set_buinesskey_ValueError(self, df):
+    def test_set_business_key_ValueError(self, df):
         with pytest.raises(ValueError, match="Must provide either bk_name or table_name"):
             set_business_key(df, "str_normal", "int_normal")
 
-    def test_set_buinesskey_table_name(self, df):
+    def test_set_business_key_custom_bk_name(self, df):
             df_result = set_business_key(df, "str_normal", "int_normal", table_name="user")
             expected = (df["str_normal"].astype(str) + "||" + df["int_normal"].astype(str))
             expected.name = "bk_user"
         
             pd.testing.assert_series_equal(df_result, expected)
 
-    def test_set_buinesskey_costum_bk_name(self, df):
+    def test_set_business_key_costum_bk_name(self, df):
             df_result = set_business_key(df, "str_normal", "int_normal", bk_name="bk_cust")
             expected = (df["str_normal"].astype(str) + "||" + df["int_normal"].astype(str))
             expected.name = "bk_cust"
         
             pd.testing.assert_series_equal(df_result, expected)
-            assert expected.name in df_result.columns
+            assert expected.name in df_result.name
 
 
-    def test_set_buinesskey_mixed_col(self, df_int_mixed):
+    def test_set_business_key_mixed_col(self, df_int_mixed):
             df_result = set_business_key(df_int_mixed, "str_normal", "int_mixed", table_name="user")
             expected = (df_int_mixed["str_normal"].astype(str) + "||" + df_int_mixed["int_mixed"].astype(str))
             expected.name = "bk_cust"
 
             pd.testing.assert_series_equal(df_result, expected)
-            assert expected.name in df_result.columns
+            assert expected.name in df_result.name
 
 class TestKeyManager:
 
@@ -122,7 +122,7 @@ class TestKeyManager:
         km.merge_dimension_keys(mock_df_pk_bk_pair)
 
         pd.testing.assert_frame_equal(
-            km.df_incoming_updated, 
+            km.df_incoming_modified, 
             mock_df_pk_bk_pair.loc[:, ["bk_correct", "key_correct", "val_col"]]
             )
 
@@ -130,7 +130,7 @@ class TestKeyDimension:
 
     def test_init_defaults(self, df_3_cols_zipped, mock_conn):
         rename_for_test = {"str_normal": "bk_correct", "int_normal": "key_correct", "str_mixed": "val_col"}
-        df_incoming = df_3_cols_zipped.rename(rename_for_test)
+        df_incoming = df_3_cols_zipped.rename(columns=rename_for_test)
         km = KeyDimension("correct", mock_conn, df_incoming)
     
         assert km.table_name == "correct"
@@ -139,7 +139,7 @@ class TestKeyDimension:
 
     def test_init_set_bk(self, df_3_cols_zipped, mock_conn):
         rename_for_test = {"str_normal": "bk_test", "int_normal": "key_correct", "str_mixed": "val_col"}
-        df_incoming = df_3_cols_zipped.rename(rename_for_test)
+        df_incoming = df_3_cols_zipped.rename(columns=rename_for_test)
         km = KeyDimension("correct", mock_conn, df_incoming, bk_name="bk_test")
     
         assert km.table_name == "correct"
@@ -148,7 +148,7 @@ class TestKeyDimension:
 
     def test_init_set_pk(self, df_3_cols_zipped, mock_conn):
         rename_for_test = {"str_normal": "bk_correct", "int_normal": "key_test", "str_mixed": "val_col"}
-        df_incoming = df_3_cols_zipped.rename(rename_for_test)
+        df_incoming = df_3_cols_zipped.rename(columns=rename_for_test)
         km = KeyDimension("correct", mock_conn, df_incoming, pk_name="key_test")
     
         assert km.table_name == "correct"
@@ -181,19 +181,19 @@ class TestKeyDimension:
 
     def test_assign_new_keys_default(self, df_3_cols_zipped, mock_conn):
         rename_for_test = {"str_normal": "bk_correct", "int_normal": "key_correct", "str_mixed": "val_col"}
-        df_incoming = df_3_cols_zipped.rename(rename_for_test)
+        df_incoming = df_3_cols_zipped.rename(columns=rename_for_test)
 
-        df_incoming.loc["key_correct"] = 0
-        km.df_pk_bk_pair = df_incoming.loc[0:3, ["bk_correct", "key_correct"]]
-
+        df_incoming["key_correct"] = 0
         km = KeyDimension("correct", mock_conn, df_incoming)
+        km.df_pk_bk_pair = df_incoming.iloc[0:3][["bk_correct", "key_correct"]]
+
         km._assign_new_keys()
 
         pd.testing.assert_frame_equal(km.df_incoming_modified, df_3_cols_zipped)
 
     def test_assign_new_keys_no_new_keys(self, df_3_cols_zipped, mock_conn):
         rename_for_test = {"str_normal": "bk_correct", "int_normal": "key_correct", "str_mixed": "val_col"}
-        df_incoming = df_3_cols_zipped.rename(rename_for_test)
+        df_incoming = df_3_cols_zipped.rename(columns=rename_for_test)
         
         km = KeyDimension("correct", mock_conn, df_incoming)
         km.df_pk_bk_pair = df_incoming.loc[["bk_correct", "key_correct"]]
@@ -203,7 +203,7 @@ class TestKeyDimension:
 
     def test_assign_new_keys_key_col_not_int(self, df_3_cols_zipped, mock_conn):
         rename_for_test = {"str_normal": "bk_correct", "int_normal": "val_col", "str_mixed": "key_correct"}
-        df_incoming = df_3_cols_zipped.rename(rename_for_test)
+        df_incoming = df_3_cols_zipped.rename(columns=rename_for_test)
         
         km = KeyDimension("correct", mock_conn, df_incoming)
         km.df_pk_bk_pair = df_incoming.loc[["bk_correct", "key_correct"]]
@@ -212,40 +212,38 @@ class TestKeyDimension:
 
     def test__call__default(self, df_3_cols_zipped, mock_conn):
         rename_for_test = {"str_normal": "bk_correct", "int_normal": "key_correct", "str_mixed": "val_col"}
-        df_incoming = df_3_cols_zipped.rename(rename_for_test)
+        df_incoming = df_3_cols_zipped.rename(columns=rename_for_test)
 
-        df_incoming.loc["key_correct"] = 0
-        km.df_pk_bk_pair = df_incoming.loc[0:3, ["bk_correct", "key_correct"]]
-
+        df_incoming["key_correct"] = 0
         km = KeyDimension("correct", mock_conn, df_incoming)
+        km.df_pk_bk_pair = df_incoming.iloc[0:3][["bk_correct", "key_correct"]]
+
         df_default = km()
 
         pd.testing.assert_frame_equal(df_default, df_3_cols_zipped)
 
     def test_process_default(self, df_3_cols_zipped, mock_conn):
         rename_for_test = {"str_normal": "bk_correct", "int_normal": "key_correct", "str_mixed": "val_col"}
-        df_incoming = df_3_cols_zipped.rename(rename_for_test)
+        df_incoming = df_3_cols_zipped.rename(columns=rename_for_test)
 
-        df_incoming.loc["key_correct"] = 0
-        km.df_pk_bk_pair = df_incoming.loc[0:3, ["bk_correct", "key_correct"]]
-
+        df_incoming["key_correct"] = 0
         km = KeyDimension("correct", mock_conn, df_incoming)
+        km.df_pk_bk_pair = df_incoming.iloc[0:3][["bk_correct", "key_correct"]]
+
         df_default = km.process()
     
         pd.testing.assert_frame_equal(df_default, df_3_cols_zipped)
 
     def test_process_called_twice(self, df_3_cols_zipped, mock_conn):
         rename_for_test = {"str_normal": "bk_correct", "int_normal": "key_correct", "str_mixed": "val_col"}
-        df_incoming = df_3_cols_zipped.rename(rename_for_test)
+        df_incoming = df_3_cols_zipped.rename(columns=rename_for_test)
 
-        df_incoming.loc["key_correct"] = 0
-        km.df_pk_bk_pair = df_incoming.loc[0:3, ["bk_correct", "key_correct"]]
-
+        df_incoming["key_correct"] = 0
         km = KeyDimension("correct", mock_conn, df_incoming)
+        km.df_pk_bk_pair = df_incoming.iloc[0:3][["bk_correct", "key_correct"]]
+
         df_default_1 = km.process()
         df_default_2 = km.process()
-
-        assert df_default_1 == df_default_2
     
         pd.testing.assert_frame_equal(df_default_1, df_default_2)
         pd.testing.assert_frame_equal(df_default_2, df_3_cols_zipped)
