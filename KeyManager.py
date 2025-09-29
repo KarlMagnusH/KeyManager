@@ -42,37 +42,37 @@ class KeyManager:
         table_name: str,
         conn: Connection,
         df_incoming: pd.DataFrame,
-        pk_name: Optional[str] = None,
+        key_name: Optional[str] = None,
         bk_name: Optional[str] = None,
     ):
         self.table_name = table_name
         self.conn = conn
-        self.df_incoming = df_incoming #TODO: Bør jeg lade være på med at ændre på denne og i stedet lave en ny instansvariabel, når jeg ændre på denne første gang?
+        self.df_incoming = df_incoming.copy()
         self.df_incoming_modified = df_incoming.copy()
-        self.pk_name = pk_name or f"key_{table_name}"
+        self.key_name = key_name or f"key_{table_name}"
         self.bk_name = bk_name or f"bk_{table_name}"
         self._length_incoming_df = len(df_incoming)
         self._processed = False
     
-    def _load_existing_pairs(self, dim_table: Optional[str] = None, pk_name: Optional[str] = None, bk_name: Optional[str] = None) -> pd.DataFrame:
+    def _load_existing_pairs(self, dim_table: Optional[str] = None, key_name: Optional[str] = None, bk_name: Optional[str] = None) -> pd.DataFrame:
         """Load existing key pairs from dimension table."""
         bk_name = bk_name or self.bk_name  
-        pk_name = pk_name or self.pk_name
+        key_name = key_name or self.key_name
         dim_table = dim_table or self.table_name
         
-        query = f"SELECT {pk_name}, {bk_name} FROM {dim_table}"
+        query = f"SELECT {key_name}, {bk_name} FROM {dim_table}"
 
         try:
             df_pk_bk_pair = pd.read_sql(query, self.conn)
         except Exception as e:
-            raise RuntimeError(f"Failed loading existing key pairs from {dim_table} with bk:{bk_name}, pk{pk_name}: {e}") from e
+            raise RuntimeError(f"Failed loading existing key pairs from {dim_table} with bk:{bk_name}, pk{key_name}: {e}") from e
 
         return df_pk_bk_pair
         
-    def merge_dimension_keys(self, df_pk_bk_pair: pd.DataFrame, bk_name: Optional[str] = None, pk_name: Optional[str] = None) -> "KeyManager":
+    def merge_dimension_keys(self, df_pk_bk_pair: pd.DataFrame, bk_name: Optional[str] = None, key_name: Optional[str] = None) -> "KeyManager":
         """Merge dimension keys into incoming dataframe."""
         bk_name = bk_name or self.bk_name
-        pk_name = pk_name or self.pk_name
+        key_name = key_name or self.key_name
         
         self.df_incoming_modified = self.df_incoming_modified.merge(
             df_pk_bk_pair,
@@ -99,10 +99,10 @@ class KeyDimension(KeyManager):
         table_name: str,
         conn: Connection,
         df_incoming: pd.DataFrame,
-        pk_name: Optional[str] = None,
+        key_name: Optional[str] = None,
         bk_name: Optional[str] = None,
     ):
-        super().__init__(table_name, conn, df_incoming, pk_name, bk_name)
+        super().__init__(table_name, conn, df_incoming, key_name, bk_name)
         self._check_bk_in_incoming_df()
         self._check_bk_value()
 
@@ -122,7 +122,11 @@ class KeyDimension(KeyManager):
             raise ValueError(f"Business key column '{self.bk_name}' not found in incoming dataframe")
         
     def _check_bk_value(self) -> None:
-
+        """
+        Checks BK values for:
+            1. Not all BK's are None
+            2. No dubplicated BK's
+        """
         bk_values = self.df_incoming_modified[self.bk_name].dropna()
         
         if bk_values.empty:
@@ -143,61 +147,26 @@ class KeyDimension(KeyManager):
 
     def _assign_new_keys(self) -> None:
         "Assign new pk's for rows missing PK after join"
-        mask_new = self.df_incoming_modified[self.pk_name].isna()
+        mask_new = self.df_incoming_modified[self.key_name].isna()
         if not mask_new.any():
             return
 
         current_max = 0
         if not self.df_pk_bk_pair.empty:
-            existing_pk = pd.to_numeric(self.df_pk_bk_pair[self.pk_name], errors="coerce") 
+            existing_pk = pd.to_numeric(self.df_pk_bk_pair[self.key_name], errors="coerce") 
             if existing_pk.isna().any():
                 raise ValueError(f"Table {self.table_name} contains non-numeric PKs")
             current_max = int(existing_pk.max())
-        
-        #TODO: Should there be a check of the dataframe has unique bk_rows before joining the pk's?
-
+    
         needed = mask_new.sum()
         new_keys = range(current_max + 1, current_max + 1 + needed)
-        self.df_incoming_modified.loc[mask_new, self.pk_name] = list(new_keys)
-        self.df_incoming_modified[self.pk_name] = self.df_incoming_modified[self.pk_name].astype(int)
+        self.df_incoming_modified.loc[mask_new, self.key_name] = list(new_keys)
+        self.df_incoming_modified[self.key_name] = self.df_incoming_modified[self.key_name].astype(int)
     
     def process(self) -> pd.DataFrame:
         """Alias for __call__ if you prefer explicit method name."""
         self()      
         return self.df_incoming_modified
-    #def _assert_no_bk_conflicts(self, df_pk_bk_pair: pd.DataFrame, bk_name: str, pk_name: str, dim_table: str=None) -> None:
-    #    if df_pk_bk_pair.empty:
-    #        dim_table = dim_table or self.table_name
-    #        raise ValueError(
-    #            f"No existing key pairs found for table '{dim_table}'. "
-    #            f"Expected columns: {bk_name}, {pk_name}"
-    #        )
-    #    unique_pairs = df_pk_bk_pair[[bk_name, pk_name]].dropna(subset=[bk_name, pk_name]).drop_duplicates()
-    #    counts = unique_pairs.groupby(bk_name, as_index=False)[pk_name].nunique()
-    #    conflicts = counts[counts[pk_name] > 1]
-    #
-    #    if not conflicts.empty:
-    #        sample_bks = conflicts[bk_name].tolist()[:10]
-    #        sample_rows = unique_pairs[unique_pairs[bk_name].isin(sample_bks)]
-    #        raise ValueError(
-    #            f"Conflict: BKs map to multiple PKs. bk_name={bk_name}, pk_name={pk_name}, "
-    #            f"count_conflicted={len(conflicts)}. Sample:\n{sample_rows.head(20)}"
-    #        )
-    #    
-    #def write_to_db(self) -> int:
-    #    """
-    #    Insert only genuinely new (BK) records into the dimension table.
-    #    Uses INSERT ... (no update). Caller should ensure uniqueness constraint on bk column in DB.
-    #    """
-    #    # Identify BKs already existing
-    #    existing_bks = set() if self.df_pk_bk_pair is None else set(self.df_pk_bk_pair[self.bk_name])
-    #    self.df_to_insert = self.df_incoming[~self.df_incoming[self.bk_name].isin(existing_bks)].copy()
-    #    #if self.df_to_insert.empty:
-    #    #    self.number_of_rows_inserted = 0
-    #    #    print(f"") #TODO: skulle nok være en log i stedet for print
-    #    # Write via pandas to_sql (append). Assumes table exists.
-    #    self.df_to_insert.to_sql(self.table_name, self.conn, if_exists="append", index=False)
-    #    #self.number_of_rows_inserted = len(self.df_to_insert) #TODO: Ville der være noget fint i at logge antallet afrækker der bliver skrevet?
 
 class KeyFact(KeyManager):
     """
@@ -206,7 +175,7 @@ class KeyFact(KeyManager):
         fact = KeyFact("fact_sales", conn, df_fact)
         fact.register_dimension(
             dim_table="dim_table",
-            pk_name="pk_name",
+            key_name="key_name",
             bk_name="bk_name"
         )
         fact.import_dimension_keys()
@@ -218,26 +187,26 @@ class KeyFact(KeyManager):
         table_name: str,
         conn: Connection,
         df_incoming: pd.DataFrame,
-        pk_name: Optional[str] = None,
+        key_name: Optional[str] = None,
         bk_name: Optional[str] = None,
     ):
-        super().__init__(table_name, conn, df_incoming, pk_name, bk_name)
+        super().__init__(table_name, conn, df_incoming, key_name, bk_name)
         self.dim_mappings: Dict[str, Dict[str, str]] = {}
 
     def register_dimension(
         self,
         dim_name: str,
         bk_name: Optional[str] = None,
-        pk_name: Optional[str] = None,
+        key_name: Optional[str] = None,
     ) -> "KeyFact":
         
         bk_name = bk_name or f"bk_{dim_name}" 
-        pk_name = pk_name or f"pk_{dim_name}"
+        key_name = key_name or f"pk_{dim_name}"
 
         self.dim_mappings[dim_name] = {
             "dim_table": dim_name,
             "bk_name": bk_name,
-            "pk_name": pk_name,
+            "key_name": key_name,
         }
         return self
 
@@ -258,22 +227,22 @@ class KeyFact(KeyManager):
             
             df_pairs = self._load_existing_pairs(
                 dim_table=m["dim_table"],
-                pk_name=m["pk_name"], 
+                key_name=m["key_name"], 
                 bk_name=m["bk_name"]
             )
-            self.merge_dimension_keys(df_pairs, m["bk_name"], m["pk_name"])
+            self.merge_dimension_keys(df_pairs, m["bk_name"], m["key_name"])
             
-            missing_mask = self.df_incoming_modified[m["pk_name"]].isna()
+            missing_mask = self.df_incoming_modified[m["key_name"]].isna()
             missing_count = missing_mask.sum()
             if fail_on_missing and missing_count > 0:
                 sample_bks = self.df_incoming_modified[missing_mask][m["bk_name"]].head(10)
                 raise ValueError(
                     f"Missing dimension keys for {missing_count} rows when mapping "
-                    f"{m['bk_name']} -> {m['pk_name']} from {m['dim_table']}. "
+                    f"{m['bk_name']} -> {m['key_name']} from {m['dim_table']}. "
                     f"Sample missing BKs:\n{sample_bks.tolist()}"
                     )
             else:
-                self.df_incoming_modified.loc[missing_mask, m['pk_name']] = DEFAULT_PK_VALUE
+                self.df_incoming_modified.loc[missing_mask, m['key_name']] = DEFAULT_PK_VALUE
                 
         bk_cols_to_pop = {m["bk_name"] for m in self.dim_mappings.values()}
         self.df_incoming_modified = self.df_incoming_modified.drop(columns=bk_cols_to_pop, errors='ignore')
