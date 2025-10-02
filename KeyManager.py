@@ -24,7 +24,7 @@ def set_business_key(df_incoming: pd.DataFrame, *columns: str, table_name: Optio
     columns_missing = [c for c in columns if c not in df_incoming.columns]
     if columns_missing:
         raise ValueError(f"Business key source columns missing in incoming df: {columns_missing}")
-    df_bk_cols_as_string = df_incoming[columns].astype(str).fillna("")
+    df_bk_cols_as_string = df_incoming[list(columns)].astype(str).fillna("")
     df_incoming[bk_name] = df_bk_cols_as_string.agg(BK_SEP.join, axis=1)
     return df_incoming[bk_name] #TODO: Bør denne retunere en df eller kolonne? (find ud af når den bruges)
 
@@ -175,7 +175,7 @@ class KeyFact(KeyManager):
         fact = KeyFact("fact_sales", conn, df_fact)
         fact.register_dimension(
             dim_table="dim_table",
-            pk_name="pk_name",
+            pk_name="key_name",
             bk_name="bk_name"
         )
         fact.import_dimension_keys()
@@ -206,7 +206,7 @@ class KeyFact(KeyManager):
         self.dim_mappings[dim_name] = {
             "dim_table": dim_name,
             "bk_name": bk_name,
-            "pk_name": pk_name,
+            "key_name": pk_name,
         }
         return self
 
@@ -219,7 +219,7 @@ class KeyFact(KeyManager):
         if self._processed == True:
             return self
         if not self.dim_mappings:
-            raise RuntimeError("Reference til dimension is missing...")
+            raise RuntimeError("Reference to dimension is missing...")
         
         for dim_name, m in self.dim_mappings.items():
             if m["bk_name"] not in self.df_incoming_modified.columns:
@@ -227,25 +227,25 @@ class KeyFact(KeyManager):
             
             df_pairs = self._load_existing_pairs(
                 dim_table=m["dim_table"],
-                pk_name=m["pk_name"], 
+                pk_name=m["key_name"], 
                 bk_name=m["bk_name"]
             )
-            self.merge_dimension_keys(df_pairs, m["bk_name"], m["pk_name"])
+            self.merge_dimension_keys(df_pairs, m["bk_name"], m["key_name"])
             
-            missing_mask = self.df_incoming_modified[m["pk_name"]].isna()
+            missing_mask = self.df_incoming_modified[m["key_name"]].isna()
             missing_count = missing_mask.sum()
             if fail_on_missing and missing_count > 0:
                 sample_bks = self.df_incoming_modified[missing_mask][m["bk_name"]].head(10)
                 raise ValueError(
                     f"Missing dimension keys for {missing_count} rows when mapping "
-                    f"{m['bk_name']} -> {m['pk_name']} from {m['dim_table']}. "
+                    f"{m['bk_name']} -> {m['key_name']} from {m['dim_table']}. "
                     f"Sample missing BKs:\n{sample_bks.tolist()}"
                     )
             else:
-                self.df_incoming_modified.loc[missing_mask, m['pk_name']] = DEFAULT_PK_VALUE
+                self.df_incoming_modified.loc[missing_mask, m["key_name"]] = DEFAULT_PK_VALUE
                 
         bk_cols_to_pop = {m["bk_name"] for m in self.dim_mappings.values()}
-        self.df_incoming_modified = self.df_incoming_modified.drop(columns=bk_cols_to_pop, errors='ignore')
+        self.df_incoming_modified = self.df_incoming_modified.drop(columns=bk_cols_to_pop, errors="ignore")
         self._processed = True
         return self
 
