@@ -4,9 +4,7 @@ import pandas as pd
 from sqlalchemy.engine import Connection
 
 from KeyManager import KeyManager, KeyDimension, KeyFact, set_business_key
-from TestCaseGen import TestCaseGen, BUILTINS
-
-test_data = TestCaseGen().add_dict(BUILTINS)
+from CaseGen import CaseGen, BUILTINS
 
 BK_SEP = "||"
 DEFAULT_PK_VALUE = -1
@@ -26,52 +24,60 @@ def mock_read_sql():
     return Mock()
 
 @pytest.fixture
-def df():
-    """Create test DataFrame from TestCaseGen data."""
-    return test_data.combine("str_normal", "int_normal").get_df()
+def test_data():
+    """Mock for pandas.read_sql function."""
+    return CaseGen().add_dict(BUILTINS)
 
-@pytest.fixture
-def df_int_mixed():
-    """Create test DataFrame from TestCaseGen data."""
-    return test_data.combine("str_normal", "int_mixed").get_df()
-
-@pytest.fixture
-def df_existing_dim():
-    return test_data.combine("str_dif", "int_dif", "str_mixed", mode="zip").get_df()
-
-@pytest.fixture
-def incoming_dimension():
-    return test_data.combine("str_dif", "str_mixed", mode="zip").get_df()
-
-@pytest.fixture
-def df_dubplicated_bk_pk_values():
-    """Certasian product of different valuees in the dataset"""
-    return test_data.combine("str_dif", "int_dif", "str_mixed").get_df()
-
-@pytest.fixture
-def df_fact():
-    """Certasian product of different valuees in the dataset"""
-    return test_data.combine("str_dif", "int_dif", "str_mixed").get_df()
-
-@pytest.fixture
-def df_dim_bk_none():
-    """Incoming df with only none in bk column"""
-    return test_data.combine("str_none", "int_dif", "str_mixed", mode="zip").get_df()
+#@pytest.fixture
+#def df():
+#    """Create test DataFrame from TestCaseGen data."""
+#    return test_data.combine("str_normal", "int_normal").get_df()
+#
+#@pytest.fixture
+#def df_int_mixed():
+#    """Create test DataFrame from TestCaseGen data."""
+#    return test_data.combine("str_normal", "int_mixed").get_df()
+#
+#@pytest.fixture
+#def df_existing_dim():
+#    return test_data.combine("str_dif", "int_dif", "str_mixed", mode="zip").get_df()
+#
+#@pytest.fixture
+#def incoming_dimension():
+#    return test_data.combine("str_dif", "str_mixed", mode="zip").get_df()
+#
+#@pytest.fixture
+#def df_dubplicated_bk_pk_values():
+#    """Certasian product of different valuees in the dataset"""
+#    return test_data.combine("str_normal", "int_normal", "str_mixed").get_df()
+#
+#@pytest.fixture
+#def df_fact():
+#    """Certasian product of different valuees in the dataset"""
+#    return test_data.combine("str_dif", "int_dif", "str_mixed").get_df()
+#
+#@pytest.fixture
+#def df_dim_bk_none():
+#    """Incoming df with only none in bk column"""
+#    return test_data.combine("str_none", "int_dif", "str_mixed", mode="zip").get_df()
 
 class TestBuisnessKey:
 
-    def test_set_business_key_ValueError(self, df):
+    def test_set_business_key_ValueError(self, test_data):
+        df = test_data.combine("str_normal", "int_normal").get_df()
         with pytest.raises(ValueError, match="Must provide either bk_name or table_name"):
             set_business_key(df, "str_normal", "int_normal")
 
-    def test_set_business_key_custom_deault(self, df):
+    def test_set_business_key_custom_deault(self, test_data):
+            df = test_data.combine("str_normal", "int_normal").get_df()
             df_result = set_business_key(df, "str_normal", "int_normal", table_name="user")
             expected = (df["str_normal"].astype(str) + "||" + df["int_normal"].astype(str))
             expected.name = "bk_user"
         
             pd.testing.assert_series_equal(df_result, expected)
 
-    def test_set_business_key_costum_bk_name(self, df):
+    def test_set_business_key_costum_bk_name(self, test_data):
+            df = test_data.combine("str_normal", "int_normal").get_df()
             df_result = set_business_key(df, "str_normal", "int_normal", bk_name="bk_cust")
             expected = (df["str_normal"].astype(str) + "||" + df["int_normal"].astype(str))
             expected.name = "bk_cust"
@@ -79,30 +85,34 @@ class TestBuisnessKey:
             pd.testing.assert_series_equal(df_result, expected)
             assert expected.name in df_result.name
 
-    def test_set_business_key_mixed_col(self, df_int_mixed):
-            df_result = set_business_key(df_int_mixed, "str_normal", "int_mixed", table_name="user")
-            expected = (df_int_mixed["str_normal"].astype(str) + "||" + df_int_mixed["int_mixed"].astype(str))
+    def test_set_business_key_mixed_col(self, test_data):
+            df = test_data.combine("str_normal", "int_mixed").get_df()
+            df_result = set_business_key(df, "str_normal", "int_mixed", table_name="user")
+            expected = (df["str_normal"].astype(str) + "||" + df["int_mixed"].astype(str))
             expected.name = "bk_user"
 
             pd.testing.assert_series_equal(df_result, expected)
 
 class TestKeyManager:
 
-    def test_init_defaults(self, df, mock_conn):
+    def test_init_defaults(self, test_data, mock_conn):
+        df = test_data.combine("str_normal", "int_mixed").get_df()
         km = KeyManager("correct", mock_conn, df)
     
         assert km.table_name == "correct"
         assert km.pk_name == "key_correct"
         assert km.bk_name == "bk_correct"
 
-    def test_init_set_bk(self, df, mock_conn):
+    def test_init_set_bk(self, test_data, mock_conn):
+        df = test_data.combine("str_normal", "int_normal").get_df()
         km = KeyManager("correct", mock_conn, df, bk_name="bk_test")
     
         assert km.table_name == "correct"
         assert km.pk_name == "key_correct"
         assert km.bk_name == "bk_test"
 
-    def test_init_set_pk(self, df, mock_conn):
+    def test_init_set_pk(self, test_data, mock_conn):
+        df = test_data.combine("str_normal", "int_normal").get_df()
         km = KeyManager("correct", mock_conn, df, pk_name="key_test")
     
         assert km.table_name == "correct"
@@ -110,272 +120,320 @@ class TestKeyManager:
         assert km.bk_name == "bk_correct"
     
     @patch('pandas.read_sql')
-    def test_load_existing_pairs_default(self, mock_read_sql, mock_conn, df_existing_dim):
-        rename_for_test = {"str_dif": "bk_correct", "int_dif": "key_correct"}
+    def test_load_existing_pairs_default(self, mock_read_sql, mock_conn, test_data):
+        
+        rename_for_test = {"str_dif": "bk_correct", "int_dif": "key_correct", "str_mixed": "val_col"}
+        mock_existing_pairs = (
+             test_data.combine("str_dif", "int_dif", "str_mixed")
+                .get_df()
+                .rename(columns=rename_for_test)
+        )
 
-        mock_existing_pairs = df_existing_dim.rename(columns=rename_for_test)
         mock_read_sql.return_value = mock_existing_pairs
 
-        km = KeyManager("correct", mock_conn, df_existing_dim)
+        km = KeyManager("correct", mock_conn, mock_existing_pairs)
+        df_result = km._load_existing_pairs()
         mock_read_sql.assert_called_once_with(
-            "SELECT key_correct, bk_correct FROM correct", 
+            "SELECT bk_correct, key_correct FROM correct", 
             mock_conn
         )
-        df_result = km._load_existing_pairs()
 
-        pd.testing.assert_frame_equal(df_result, mock_existing_pairs)
+        pd.testing.assert_frame_equal(df_result, mock_existing_pairs, check_like=True)
 
-    def test_merge_dimension_table_keys_default(self, mock_conn, df_existing_dim):
+    def test_merge_dimension_table_keys_default(self, mock_conn, test_data):
         rename_for_test = {"str_dif": "bk_correct", "int_dif": "key_correct", "str_mixed": "val_col"}
-        df_existing_dim = df_existing_dim.rename(columns=rename_for_test)
-        mock_df_pk_bk_pair = df_existing_dim[["bk_correct", "key_correct"]]
+        df_existing_dim = (
+             test_data.combine("str_dif", "int_dif", "str_mixed", mode="zip")
+                .get_df()
+                .rename(columns=rename_for_test)
+        )
+        mock_df_existing_pk_bk_pair = df_existing_dim[["bk_correct", "key_correct"]]
         df_incoming = df_existing_dim[["bk_correct", "val_col"]]
 
         km = KeyManager("correct", mock_conn, df_incoming)
-        #mock_df_pk_bk_pair = km._load_existing_pairs() #In reality there this happens internaly in the class
-        km.merge_dimension_keys(mock_df_pk_bk_pair)
+        #mock_df_existing_pk_bk_pair = km._load_existing_pairs() #In reality there this happens internaly in the class
+        km.merge_dimension_keys(mock_df_existing_pk_bk_pair)
         print(km.df_incoming_modified.columns)
 
-        pd.testing.assert_frame_equal(
-            km.df_incoming_modified, 
-            df_existing_dim,
-            check_like=True
-            )
+        pd.testing.assert_frame_equal(km.df_incoming_modified, df_existing_dim, check_like=True)
 
 class TestKeyDimension:
 
-    @patch.object(KeyDimension, '_load_existing_pairs')
-    def test_init_defaults(self, mock_load_pairs, df_existing_dim, mock_conn):
+    def test_init_defaults(self, test_data, mock_conn):
         rename_for_test = {"str_dif": "bk_correct", "int_dif": "key_correct", "str_mixed": "val_col"}
-        df_existing_dim = df_existing_dim.rename(columns=rename_for_test)
+        df_existing_dim = (
+             test_data.combine("str_dif", "int_dif", "str_mixed", mode="zip")
+                .get_df()
+                .rename(columns=rename_for_test)
+        )
 
         df_incoming = df_existing_dim[["bk_correct", "val_col"]]
-        mock_load_pairs.return_value = df_existing_dim[["bk_correct", "key_correct"]]
 
         km = KeyDimension("correct", mock_conn, df_incoming)
-        mock_load_pairs.assert_called_once_with(
-            "SELECT key_correct, bk_correct FROM correct",
-            mock_conn
-        )
     
         assert km.table_name == "correct"
         assert km.pk_name == "key_correct"
         assert km.bk_name == "bk_correct"
 
-    @patch.object(KeyDimension, '_load_existing_pairs')
-    def test_init_set_bk(self, mock_load_pairs, df_existing_dim, mock_conn):
-        rename_for_test = {"str_dif": "bk_test", "int_normal": "key_dif", "str_mixed": "val_col"}
-        df_existing_dim = df_existing_dim.rename(columns=rename_for_test)
+    def test_init_set_bk(self, test_data, mock_conn):
+        rename_for_test = {"str_dif": "bk_test", "int_dif": "key_correct", "str_mixed": "val_col"}
+        df_existing_dim = (
+             test_data.combine("str_dif", "int_dif", "str_mixed", mode="zip")
+                .get_df()
+                .rename(columns=rename_for_test)
+        )
 
         df_incoming = df_existing_dim[["bk_test", "val_col"]]
-        mock_load_pairs.return_value = df_incoming[["bk_test", "key_correct"]]
 
         km = KeyDimension("correct", mock_conn, df_incoming, bk_name="bk_test")
-        mock_load_pairs.assert_called_once_with(
-            "SELECT key_correct, bk_test FROM correct",
-            mock_conn
-        )
     
         assert km.table_name == "correct"
         assert km.pk_name == "key_correct"
         assert km.bk_name == "bk_test"
 
-    @patch.object(KeyDimension, '_load_existing_pairs')
-    def test_init_set_pk(self, mock_load_pairs, df_existing_dim, mock_conn):
+    def test_init_set_pk(self, test_data, mock_conn):
         rename_for_test = {"str_dif": "bk_correct", "int_dif": "key_test", "str_mixed": "val_col"}
-        df_existing_dim = df_existing_dim.rename(columns=rename_for_test)
+        df_existing_dim = (
+             test_data.combine("str_dif", "int_dif", "str_mixed", mode="zip")
+                .get_df()
+                .rename(columns=rename_for_test)
+        )
         
         df_incoming = df_existing_dim[["bk_correct", "val_col"]]
-        mock_load_pairs.return_value = df_incoming[["bk_correct", "key_test"]]
         
         km = KeyDimension("correct", mock_conn, df_incoming, pk_name="key_test")
-        mock_load_pairs.assert_called_once_with(
-            "SELECT key_test, bk_correct FROM correct",
-            mock_conn
-        )
         
         assert km.table_name == "correct"
         assert km.pk_name == "key_test"
         assert km.bk_name == "bk_correct"
 
-    @patch.object(KeyDimension, '_load_existing_pairs')
-    def test_check_bk_in_incoming_df_dub(self, mock_load_pairs, df_existing_dim, mock_conn):
+    def test_check_bk_in_incoming_df(self, test_data, mock_conn):
         rename_for_test = {"str_dif": "bk_test", "int_dif": "key_correct", "str_mixed": "val_col"}
-        df_existing_dim = df_existing_dim.rename(rename_for_test)
+        df_existing_dim = (
+             test_data.combine("str_dif", "int_dif", "str_mixed", mode="zip")
+                .get_df()
+                .rename(columns=rename_for_test)
+        )
 
-
-        df_incoming = df_existing_dim[["bk_correct", "val_col"]]
-        mock_load_pairs.return_value = df_incoming[["bk_correct", "key_correct"]]
+        df_incoming = df_existing_dim[["bk_test", "val_col"]]
          
-        with pytest.raises(ValueError, match="Business key column bk_correct not found in incoming dataframe"):
+        with pytest.raises(ValueError, match="Business key column 'bk_correct' not found in incoming dataframe"):
             KeyDimension("correct", mock_conn, df_incoming)
-    
-    @patch.object(KeyDimension, '_load_existing_pairs')
-    def test_check_bk_value_no_valid_bk_values(self, mock_load_pairs, df_dim_bk_none, mock_conn):
+    def test_check_bk_value_no_valid_bk_values(self, test_data, mock_conn):
         "Tests existience of valid bk values"
         rename_for_test = {"str_none": "bk_correct", "int_dif": "key_correct", "str_mixed": "val_col"}
-        df_dim_bk_none = df_dim_bk_none.rename(rename_for_test)
-
+        df_dim_bk_none = ( test_data.combine("str_none", "int_dif", "str_mixed", mode="zip")
+                .get_df()
+                .rename(columns=rename_for_test)
+        )
 
         df_incoming = df_dim_bk_none[["bk_correct", "val_col"]]
-        mock_load_pairs.return_value = df_incoming[["bk_correct", "key_correct"]]
 
         with pytest.raises(ValueError, match="No valid business key values found in column"):
             KeyDimension("correct", mock_conn, df_incoming)
 
-    @patch.object(KeyDimension, '_load_existing_pairs')
-    def test_check_bk_value_dublicated_values(self, mock_load_pairs, df_dubplicated_bk_pk_values, mock_conn):
-        rename_for_test = {"str_normal": "bk_correct", "int_normal": "key_correct", "str_mixed": "val_col"}
-        df_dubplicated_bk_pk_values = df_dubplicated_bk_pk_values.rename(rename_for_test)
-
+    def test_check_bk_value_dublicated_values(self, test_data, mock_conn):
+        rename_for_test = {"str_dif": "bk_correct", "int_dif": "key_correct", "str_mixed": "val_col"}
+        df_dubplicated_bk_pk_values = (
+             test_data.combine("str_dif", "int_dif", "str_mixed")
+                .get_df()
+                .rename(columns=rename_for_test)
+        )
 
         df_incoming = df_dubplicated_bk_pk_values[["bk_correct", "val_col"]]
-        mock_load_pairs.return_value = df_incoming[["bk_correct", "key_correct"]]
          
         with pytest.raises(ValueError, match="Duplicate business keys found in incoming data for table '"):
             KeyDimension("correct", mock_conn, df_incoming)
 
-    def test_assign_new_keys_default(self, df_existing_dim, mock_conn):
+    @patch.object(KeyDimension, "_load_existing_pairs")
+    def test_assign_new_keys_default(self, mock_load_existing_dim, test_data, mock_conn):
         rename_for_test = {"str_dif": "bk_correct", "int_dif": "key_correct", "str_mixed": "val_col"}
-        df_existing_dim = df_existing_dim.rename(columns=rename_for_test)
+        df_existing_dim = (
+             test_data.combine("str_dif", "int_dif", "str_mixed", mode="zip")
+                .get_df()
+                .rename(columns=rename_for_test)
+        )
 
         df_incoming = df_existing_dim[["bk_correct", "val_col"]]
+        mock_load_existing_dim.return_value = df_existing_dim.iloc[0:3][["bk_correct", "key_correct"]]
+        
         km = KeyDimension("correct", mock_conn, df_incoming)
-
-        df_pk_bk_pair = df_incoming.iloc[0:3][["bk_correct", "key_correct"]]
-        km.merge_dimension_keys(df_pk_bk_pair)
+        km.df_existing_pk_bk_pair = km._load_existing_pairs()
+        km.merge_dimension_keys(km.df_existing_pk_bk_pair)
         km._assign_new_keys()
 
-        assert km.df_incoming_modified["key_correct"].nunique() == df_incoming["key_correct"].nunique()
+        assert km.df_incoming_modified["key_correct"].nunique() == df_existing_dim["key_correct"].nunique()
         assert km.df_incoming_modified["key_correct"].dtype.kind in ['i', 'u']
 
-    def test_assign_new_keys_no_new_keys(self, df_existing_dim, mock_conn):
+    def test_assign_new_keys_no_new_keys(self, test_data, mock_conn):
         rename_for_test = {"str_dif": "bk_correct", "int_dif": "key_correct", "str_mixed": "val_col"}
-        df_existing_dim = df_existing_dim.rename(columns=rename_for_test)
-
+        df_existing_dim = (
+             test_data.combine("str_dif", "int_dif", "str_mixed", mode="zip")
+                .get_df()
+                .rename(columns=rename_for_test)
+        )
         df_incoming = df_existing_dim[["bk_correct", "val_col"]]
+        df_existing_pk_bk_pair = df_existing_dim[["bk_correct", "key_correct"]]
+        
         km = KeyDimension("correct", mock_conn, df_incoming)
 
-        df_pk_bk_pair = df_incoming[["bk_correct", "key_correct"]]
-        km.merge_dimension_keys(df_pk_bk_pair)
+        km.merge_dimension_keys(df_existing_pk_bk_pair)
         km._assign_new_keys()
 
-        pd.testing.assert_frame_equal(km.df_incoming_modified, df_existing_dim)
-
-    def test_assign_new_keys_key_col_not_int(self, df_existing_dim, mock_conn):
-        rename_for_test = {"str_normal": "bk_correct", "int_normal": "val_col", "str_mixed": "key_correct"}
-        df_existing_dim = df_existing_dim.rename(columns=rename_for_test)
+        pd.testing.assert_frame_equal(km.df_incoming_modified, df_existing_dim, check_like=True)
+   
+ 
+    @patch.object(KeyDimension, "_load_existing_pairs")
+    def test_assign_new_keys_key_col_not_int(self, mock_load_existing_dim, test_data, mock_conn):
+        rename_for_test = {"str_dif": "bk_correct", "int_dif": "val_col", "str_mixed": "key_correct"}
+        df_existing_dim = (
+             test_data.combine("str_dif", "int_dif", "str_mixed", mode="zip")
+                .get_df()
+                .rename(columns=rename_for_test)
+        )
 
         df_incoming = df_existing_dim[["bk_correct", "val_col"]]
+        df_existing_pk_bk_pair = df_existing_dim[["bk_correct", "key_correct"]]
+        mock_load_existing_dim.return_value = df_existing_pk_bk_pair 
         km = KeyDimension("correct", mock_conn, df_incoming)
-        df_pk_bk_pair = df_incoming[["bk_correct", "key_correct"]]
 
-        km.merge_dimension_keys(df_pk_bk_pair)
+        km.df_existing_pk_bk_pair =  km._load_existing_pairs()  
+        km.merge_dimension_keys(df_existing_pk_bk_pair)
+
+
         with pytest.raises(ValueError, match=f"Table {km.table_name} contains non-numeric PKs"):
             km._assign_new_keys()
 
-    @patch.object(KeyDimension, '_load_existing_pairs')
-    def test__call__default(self, mock_load_pairs, df_existing_dim, mock_conn):
+    @patch("pandas.read_sql")
+    def test__call__default(self, mock_pd_read_sql, test_data, mock_conn):
         rename_for_test = {"str_dif": "bk_correct", "int_dif": "key_correct", "str_mixed": "val_col"}
-        df_existing_dim = df_existing_dim.rename(columns=rename_for_test)
+        df_existing_dim = (
+             test_data.combine("str_dif", "int_dif", "str_mixed", mode="zip")
+                .get_df()
+                .rename(columns=rename_for_test)
+        )        
+
         df_incoming = df_existing_dim[["bk_correct", "val_col"]]
 
-        mock_load_pairs.return_value = df_incoming[["bk_correct", "key_correct"]]
+        mock_pd_read_sql.return_value = df_existing_dim[["bk_correct", "key_correct"]]
 
         km = KeyDimension("correct", mock_conn, df_incoming)
-        df_default = km()
+        km()
+        mock_pd_read_sql.assert_called_once_with(
+            "SELECT bk_correct, key_correct FROM correct",
+            mock_conn
+        )
 
-        pd.testing.assert_frame_equal(df_default, df_existing_dim)
+        pd.testing.assert_frame_equal(km.df_incoming_modified, df_existing_dim, check_like=True)
 
-    @patch.object(KeyDimension, '_load_existing_pairs')
-    def test_process_default(self, mock_load_pairs, df_existing_dim, mock_conn):
+    @patch("pandas.read_sql")
+    def test_process_default(self, mock_pd_read_sql, test_data, mock_conn):
         rename_for_test = {"str_dif": "bk_correct", "int_dif": "key_correct", "str_mixed": "val_col"}
-        df_existing_dim = df_existing_dim.rename(columns=rename_for_test)
+        df_existing_dim = (
+             test_data.combine("str_dif", "int_dif", "str_mixed", mode="zip")
+                .get_df()
+                .rename(columns=rename_for_test)
+        )    
         df_incoming = df_existing_dim[["bk_correct", "val_col"]]
-
-        mock_load_pairs.return_value = df_incoming[["bk_correct", "key_correct"]]
+        mock_pd_read_sql.return_value = df_existing_dim[["bk_correct", "key_correct"]]
 
         km = KeyDimension("correct", mock_conn, df_incoming)
         df_result = km.process()
-    
-        pd.testing.assert_frame_equal(df_result, df_existing_dim)
 
-    @patch.object(KeyDimension, '_load_existing_pairs')
-    def test_process_called_twice(self, mock_load_pairs, df_existing_dim, mock_conn):
+        mock_pd_read_sql.assert_called_once_with(
+            "SELECT bk_correct, key_correct FROM correct",
+            mock_conn
+        )
+        pd.testing.assert_frame_equal(df_result, df_existing_dim, check_like=True)
+
+    @patch("pandas.read_sql")
+    def test_process_called_twice(self, mock_pd_read_sql, test_data, mock_conn):
         rename_for_test = {"str_dif": "bk_correct", "int_dif": "key_correct", "str_mixed": "val_col"}
-        df_existing_dim = df_existing_dim.rename(columns=rename_for_test)
+        df_existing_dim = (
+             test_data.combine("str_dif", "int_dif", "str_mixed", mode="zip")
+                .get_df()
+                .rename(columns=rename_for_test)
+        )  
+ 
         df_incoming = df_existing_dim[["bk_correct", "val_col"]]
-
-        mock_load_pairs.return_value = df_incoming[["bk_correct", "key_correct"]]
+        mock_pd_read_sql.return_value = df_existing_dim[["bk_correct", "key_correct"]]
 
         km = KeyDimension("correct", mock_conn, df_incoming)
 
         df_default_1 = km.process()
         df_default_2 = km.process()
-    
-        assert km._processed == True
-        pd.testing.assert_frame_equal(df_default_1, df_default_2)
 
-        
+        mock_pd_read_sql.assert_called_once_with(
+            "SELECT bk_correct, key_correct FROM correct",
+            mock_conn
+        )
+        assert km._processed == True
+        pd.testing.assert_frame_equal(df_default_1, df_default_2, check_like=True)
+
 class TestKeyFact:
 
-    def test_init_defaults(self, df, mock_conn):
+    def test_init_defaults(self, test_data, mock_conn):
+        df = test_data.combine("str_dif", "int_dif", "str_mixed").get_df()
         km = KeyFact("correct", mock_conn, df)
     
         assert km.table_name == "correct"
         assert km.pk_name == "key_correct"
         assert km.bk_name == "bk_correct"
 
-    def test_init_set_bk(self, df, mock_conn):
+    def test_init_set_bk(self, test_data, mock_conn):
+        df = test_data.combine("str_dif", "int_dif", "str_mixed").get_df()
         km = KeyFact("correct", mock_conn, df, bk_name="bk_test")
     
         assert km.table_name == "correct"
         assert km.pk_name == "key_correct"
         assert km.bk_name == "bk_test"
 
-    def test_init_set_pk(self, df, mock_conn):
+    def test_init_set_pk(self, test_data, mock_conn):
+        df = test_data.combine("str_dif", "int_dif", "str_mixed").get_df()
         km = KeyFact("correct", mock_conn, df, pk_name="key_test")
     
         assert km.table_name == "correct"
         assert km.pk_name == "key_test"
         assert km.bk_name == "bk_correct"
     
-    def test_register_dimension_default(self, df, mock_conn):
+    def test_register_dimension_default(self, test_data, mock_conn):
+        df = test_data.combine("str_dif", "int_dif", "str_mixed").get_df()
         km = KeyFact("correct", mock_conn, df, pk_name="key_test")
         km.register_dimension("correct")
         
         assert km.dim_mappings["correct"]["dim_table"] == "correct"
-        assert km.dim_mappings["correct"]["pk_name"] == "key_correct"
+        assert km.dim_mappings["correct"]["key_name"] == "key_correct"
         assert km.dim_mappings["correct"]["bk_name"] == "bk_correct"
     
-    def test_register_dimension_modified_bk_pk(self, df, mock_conn):
+    def test_register_dimension_modified_bk_pk(self, test_data, mock_conn):
+        df = test_data.combine("str_dif", "int_dif", "str_mixed").get_df()
         km = KeyFact("correct", mock_conn, df, pk_name="key_test")
-        km.register_dimension("correct", bk_name="bk_test", pk_name="pk_test")
+        km.register_dimension("correct", bk_name="bk_test", pk_name="key_test")
 
         assert km.dim_mappings["correct"]["dim_table"] == "correct"
-        assert km.dim_mappings["correct"]["pk_name"] == "pk_test"
+        assert km.dim_mappings["correct"]["key_name"] == "key_test"
         assert km.dim_mappings["correct"]["bk_name"] == "bk_test"
 
-    def test_register_all_dimensions_with_list(self, df, mock_conn):
-        """Test passing dimensions as unpacked list."""
+    def test_register_all_dimensions_with_list(self, test_data, mock_conn):
+        df = test_data.combine("str_dif", "int_dif", "str_mixed").get_df()
         km = KeyFact("correct", mock_conn, df)
         names = [str(i) for i in range(5)]
         km.register_all_dimensions(*names)
 
         for name in names:
             assert km.dim_mappings[name]["dim_table"] == name
-            assert km.dim_mappings[name]["pk_name"] == f"key_{name}"
+            assert km.dim_mappings[name]["key_name"] == f"key_{name}"
             assert km.dim_mappings[name]["bk_name"] == f"bk_{name}"
 
-    def test_register_all_dimensions_individual_args(self, df, mock_conn):
-        """Test passing dimensions as individual arguments."""
+    def test_register_all_dimensions_individual_args(self, test_data, mock_conn):        
+        df = test_data.combine("str_dif", "int_dif", "str_mixed").get_df()
         km = KeyFact("correct", mock_conn, df)
         km.register_all_dimensions("users", "products", "stores")
 
         expected_dims = ["users", "products", "stores"]
         for name in expected_dims:
             assert km.dim_mappings[name]["dim_table"] == name
-            assert km.dim_mappings[name]["pk_name"] == f"key_{name}"
+            assert km.dim_mappings[name]["key_name"] == f"key_{name}"
             assert km.dim_mappings[name]["bk_name"] == f"bk_{name}"
 
     
@@ -387,7 +445,7 @@ class TestKeyFact:
             "bk_users": ["user1", "user2", "user3"],
             "bk_products": ["prod1", "prod2", "prod3"]
         })
-    
+
     @pytest.fixture
     def users_dimension_pairs(self):
         """Mock dimension pairs for users."""
@@ -413,7 +471,7 @@ class TestKeyFact:
         result = fact.import_dimension_keys()
         
         assert result is fact
-        pd.testing.assert_frame_equal(fact.df_incoming_modified, original_df)
+        pd.testing.assert_frame_equal(fact.df_incoming_modified, original_df, check_like=True)
 
     def test_import_dimension_keys_no_mappings(self, fact_df, mock_conn):
         """Test error when no dimension mappings are registered."""
@@ -449,12 +507,11 @@ class TestKeyFact:
         # Verify calls
         mock_load.assert_called_once_with(
             dim_table="users",
-            pk_name="pk_users",
+            pk_name="key_users",
             bk_name="bk_users"
         )
-        mock_merge.assert_called_once_with(users_dimension_pairs, "bk_users", "pk_users")
-        
-        # Verify result
+        mock_merge.assert_called_once_with(users_dimension_pairs, "bk_users", "key_users")
+        # result
         assert result is fact
         assert fact._processed is True
         assert "bk_users" not in fact.df_incoming_modified.columns  # BK column removed

@@ -60,22 +60,22 @@ class KeyManager:
         pk_name = pk_name or self.pk_name
         dim_table = dim_table or self.table_name
         
-        query = f"SELECT {pk_name}, {bk_name} FROM {dim_table}"
+        query = f"SELECT {bk_name}, {pk_name} FROM {dim_table}"
 
         try:
-            df_pk_bk_pair = pd.read_sql(query, self.conn)
+            df_existing_pk_bk_pair = pd.read_sql(query, self.conn)
         except Exception as e:
             raise RuntimeError(f"Failed loading existing key pairs from {dim_table} with bk:{bk_name}, pk:{pk_name}: {e}") from e
 
-        return df_pk_bk_pair
+        return df_existing_pk_bk_pair
         
-    def merge_dimension_keys(self, df_pk_bk_pair: pd.DataFrame, bk_name: Optional[str] = None, pk_name: Optional[str] = None) -> "KeyManager":
+    def merge_dimension_keys(self, df_existing_pk_bk_pair: pd.DataFrame, bk_name: Optional[str] = None, pk_name: Optional[str] = None) -> "KeyManager":
         """Merge dimension keys into incoming dataframe."""
         bk_name = bk_name or self.bk_name
         pk_name = pk_name or self.pk_name
         
         self.df_incoming_modified = self.df_incoming_modified.merge(
-            df_pk_bk_pair,
+            df_existing_pk_bk_pair,
             on=bk_name,
             how="left",
         )
@@ -111,8 +111,8 @@ class KeyDimension(KeyManager):
         if self._processed:
             return self.df_incoming_modified
             
-        self.df_pk_bk_pair = self._load_existing_pairs()
-        self.merge_dimension_keys(self.df_pk_bk_pair)
+        self.df_existing_pk_bk_pair = self._load_existing_pairs()
+        self.merge_dimension_keys(self.df_existing_pk_bk_pair)
         self._assign_new_keys()
         
         self._processed = True
@@ -152,8 +152,8 @@ class KeyDimension(KeyManager):
             return
 
         current_max = 0
-        if not self.df_pk_bk_pair.empty:
-            existing_pk = pd.to_numeric(self.df_pk_bk_pair[self.pk_name], errors="coerce") 
+        if self.df_existing_pk_bk_pair is None or not self.df_existing_pk_bk_pair.empty:
+            existing_pk = pd.to_numeric(self.df_existing_pk_bk_pair[self.pk_name], errors="coerce") 
             if existing_pk.isna().any():
                 raise ValueError(f"Table {self.table_name} contains non-numeric PKs")
             current_max = int(existing_pk.max())
@@ -201,7 +201,7 @@ class KeyFact(KeyManager):
     ) -> "KeyFact":
         
         bk_name = bk_name or f"bk_{dim_name}" 
-        pk_name = pk_name or f"pk_{dim_name}"
+        pk_name = pk_name or f"key_{dim_name}"
 
         self.dim_mappings[dim_name] = {
             "dim_table": dim_name,
