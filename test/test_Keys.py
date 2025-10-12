@@ -3,7 +3,7 @@ from unittest.mock import patch, Mock
 import pandas as pd
 from sqlalchemy.engine import Connection
 
-from src.KeyManager import KeyManager, KeyDimension, KeyFact, set_business_key
+from src.Keys import KeyManager, KeyDimension, KeyFact, set_business_key
 from CaseGen import CaseGen, BUILTINS
 
 BK_SEP = "||"
