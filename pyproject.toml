@@ -3,7 +3,7 @@ requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "Keys"
+name = "keys"
 version = "0.1.0"
 description = "Manages key generation for dimensions and merges for facts. Builds on pandas."
 dependencies = ["sqlalchemy", "pandas"]

@@ -5,7 +5,7 @@ This package provides classes for handling primary keys, business keys,
 and dimension/fact table relationships in data warehousing scenarios.
 """
 
-from .Keys import KeyManager, KeyDimension, KeyFact, set_business_key
+from .keys import KeyManager, KeyDimension, KeyFact, set_business_key
 
 # Package metadata
 __version__ = "0.1.0"
