@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "KeyManager"
+version = "0.1.0"
+description = "Manages key generation for dimensions and merges for facts. Builds on pandas."
+dependencies = ["sqlalchemy", "pandas"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["keymanager*"]
+exclude = ["tests*"]

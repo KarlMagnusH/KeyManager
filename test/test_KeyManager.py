@@ -3,7 +3,7 @@ from unittest.mock import patch, Mock
 import pandas as pd
 from sqlalchemy.engine import Connection
 
-from KeyManager import KeyManager, KeyDimension, KeyFact, set_business_key
+from src.KeyManager import KeyManager, KeyDimension, KeyFact, set_business_key
 from CaseGen import CaseGen, BUILTINS
 
 BK_SEP = "||"
@@ -27,39 +27,6 @@ def mock_read_sql():
 def test_data():
     """Mock for pandas.read_sql function."""
     return CaseGen().add_dict(BUILTINS)
-
-#@pytest.fixture
-#def df():
-#    """Create test DataFrame from TestCaseGen data."""
-#    return test_data.combine("str_normal", "int_normal").get_df()
-#
-#@pytest.fixture
-#def df_int_mixed():
-#    """Create test DataFrame from TestCaseGen data."""
-#    return test_data.combine("str_normal", "int_mixed").get_df()
-#
-#@pytest.fixture
-#def df_existing_dim():
-#    return test_data.combine("str_dif", "int_dif", "str_mixed", mode="zip").get_df()
-#
-#@pytest.fixture
-#def incoming_dimension():
-#    return test_data.combine("str_dif", "str_mixed", mode="zip").get_df()
-#
-#@pytest.fixture
-#def df_dubplicated_bk_pk_values():
-#    """Certasian product of different valuees in the dataset"""
-#    return test_data.combine("str_normal", "int_normal", "str_mixed").get_df()
-#
-#@pytest.fixture
-#def df_fact():
-#    """Certasian product of different valuees in the dataset"""
-#    return test_data.combine("str_dif", "int_dif", "str_mixed").get_df()
-#
-#@pytest.fixture
-#def df_dim_bk_none():
-#    """Incoming df with only none in bk column"""
-#    return test_data.combine("str_none", "int_dif", "str_mixed", mode="zip").get_df()
 
 class TestBuisnessKey:
 

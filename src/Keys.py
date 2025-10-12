@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Sequence, Dict, Optional
+from typing import Dict, Optional
 import pandas as pd
 from sqlalchemy.engine import Connection
 
@@ -215,7 +215,7 @@ class KeyFact(KeyManager):
             self.register_dimension(dim_name=dim_name)
         return self
     
-    def import_dimension_keys(self, fail_on_missing: bool = True):
+    def import_dimension_keys(self, fail_on_missing: bool = False):
         if self._processed == True:
             return self
         if not self.dim_mappings:
