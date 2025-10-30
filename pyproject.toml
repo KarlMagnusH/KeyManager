@@ -9,6 +9,6 @@ description = "Manages key generation for dimensions and merges for facts. Build
 dependencies = ["sqlalchemy", "pandas"]
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["src*"]
+where = ["src"]
+include = ["*"]
 exclude = ["test*"]

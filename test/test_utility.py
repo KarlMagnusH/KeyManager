@@ -1,7 +1,5 @@
 import pytest
-from unittest.mock import patch, Mock
 import pandas as pd
-from sqlalchemy.engine import Connection
 
 from src.utility import set_business_key
 from CaseGen import CaseGen, BUILTINS
