@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools", "wheel"]
+requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -9,6 +9,5 @@ description = "Manages key generation for dimensions and merges for facts. Build
 dependencies = ["sqlalchemy", "pandas"]
 
 [tool.setuptools.packages.find]
-where = ["src"]
-include = ["*"]
-exclude = ["test*"]
+where = ["."]
+include = ["keys*"]
