@@ -29,44 +29,10 @@ class KeyFact(KeyManager):
         df_incoming: pd.DataFrame,
         pk_name: Optional[str] = None,
         bk_name: Optional[str] = None,
+        key_condition:Optional[str] = None,
     ):
-        super().__init__(table_name, conn, df_incoming, pk_name, bk_name)
+        super().__init__(table_name, conn, df_incoming, pk_name, bk_name, key_condition)
         self.dim_mappings: Dict[str, Dict[str, str]] = {}
-    
-    def _import_dimension_keys(self, fail_on_missing: bool = False):
-        #TODO: This function should be split in multiple
-        if self._processed == True:
-            return self
-        if not self.dim_mappings:
-            raise RuntimeError("Reference to dimension is missing. Either register_dimension or register_all_dimension must be called.")
-        
-        for dim_name, m in self.dim_mappings.items():
-            if m["bk_name"] not in self.df_incoming_modified.columns:
-                raise ValueError(f"Fact BK column '{m['bk_name']}' missing in incoming dataframe.")
-            
-            df_pairs = self._load_existing_pairs(
-                dim_table=m["dim_table"],
-                pk_name=m["key_name"], 
-                bk_name=m["bk_name"]
-            )
-            self._merge_dimension_keys(df_pairs, m["bk_name"], m["key_name"])
-            
-            missing_mask = self.df_incoming_modified[m["key_name"]].isna()
-            missing_count = missing_mask.sum()
-            if fail_on_missing and missing_count > 0:
-                sample_bks = self.df_incoming_modified[missing_mask][m["bk_name"]].head(10)
-                raise ValueError(
-                    f"Missing dimension keys for {missing_count} rows when mapping "
-                    f"{m['bk_name']} -> {m['key_name']} from {m['dim_table']}. "
-                    f"Sample missing BKs:\n{sample_bks.tolist()}"
-                    )
-            else:
-                self.df_incoming_modified.loc[missing_mask, m["key_name"]] = DEFAULT_PK_VALUE
-                
-        bk_cols_to_pop = {m["bk_name"] for m in self.dim_mappings.values()}
-        self.df_incoming_modified = self.df_incoming_modified.drop(columns=bk_cols_to_pop, errors="ignore")
-        self._processed = True
-        return self
 
     def related_dimension(
         self,
@@ -90,7 +56,49 @@ class KeyFact(KeyManager):
             self.related_dimension(dim_name=dim_name)
         return self
 
+    def _import_dimension_keys(self, fail_on_missing: bool = False):
+        #TODO: This function should be split in multiple
+        if self._processed == True:
+            return self
+        if not self.dim_mappings:
+            raise RuntimeError("Reference to dimension is missing. Either register_dimension or register_all_dimension must be called.")
+        
+        for dim_name, m in self.dim_mappings.items():
+            if m["bk_name"] not in self.df_incoming_modified.columns:
+                raise ValueError(f"Fact BK column '{m['bk_name']}' missing in incoming dataframe.")
+            
+            df_pairs = self._load_existing_pairs(
+                dim_table=m["dim_table"],
+                pk_name=m["key_name"], 
+                bk_name=m["bk_name"]
+            )
+            self._merge_keys(df_pairs, m["bk_name"], m["key_name"])
+            
+            missing_mask = self.df_incoming_modified[m["key_name"]].isna()
+            missing_count = missing_mask.sum()
+            if fail_on_missing and missing_count > 0:
+                sample_bks = self.df_incoming_modified[missing_mask][m["bk_name"]].head(10)
+                raise ValueError(
+                    f"Missing dimension keys for {missing_count} rows when mapping "
+                    f"{m['bk_name']} -> {m['key_name']} from {m['dim_table']}. "
+                    f"Sample missing BKs:\n{sample_bks.tolist()}"
+                    )
+            else:
+                self.df_incoming_modified.loc[missing_mask, m["key_name"]] = DEFAULT_PK_VALUE
+                
+        bk_cols_to_pop = {m["bk_name"] for m in self.dim_mappings.values()}
+        self.df_incoming_modified = self.df_incoming_modified.drop(columns=bk_cols_to_pop, errors="ignore")
+        self._processed = True
+        return self
+
     def process(self) -> pd.DataFrame:
+        if self._processed:
+            return self.df_incoming_modified
+            
+        self.df_existing_pk_bk_pair = self._load_existing_keys()
+        self._merge_keys(self.df_existing_pk_bk_pair)
+
         self._import_dimension_keys()
+        self.initial_max_pk = self._get_max_existing_key()
         self._assign_new_keys()
         return self.df_incoming_modified
