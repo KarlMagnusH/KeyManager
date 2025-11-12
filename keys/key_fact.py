@@ -29,7 +29,7 @@ class KeyFact(KeyManager):
         df_incoming: pd.DataFrame,
         pk_name: Optional[str] = None,
         bk_name: Optional[str] = None,
-        key_condition:Optional[str] = None,
+        key_condition: Optional[str] = None,
     ):
         super().__init__(table_name, conn, df_incoming, pk_name, bk_name, key_condition)
         self.dim_mappings: Dict[str, Dict[str, str]] = {}
@@ -67,7 +67,7 @@ class KeyFact(KeyManager):
             if m["bk_name"] not in self.df_incoming_modified.columns:
                 raise ValueError(f"Fact BK column '{m['bk_name']}' missing in incoming dataframe.")
             
-            df_pairs = self._load_existing_pairs(
+            df_pairs = self._load_existing_keys(
                 dim_table=m["dim_table"],
                 pk_name=m["key_name"], 
                 bk_name=m["bk_name"]
@@ -86,6 +86,7 @@ class KeyFact(KeyManager):
             else:
                 self.df_incoming_modified.loc[missing_mask, m["key_name"]] = DEFAULT_PK_VALUE
                 
+        #remove bk cols
         bk_cols_to_pop = {m["bk_name"] for m in self.dim_mappings.values()}
         self.df_incoming_modified = self.df_incoming_modified.drop(columns=bk_cols_to_pop, errors="ignore")
         self._processed = True
