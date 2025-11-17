@@ -11,7 +11,6 @@ MAX_SAMPLE_CONFLICTS = 10 #TODO
 MAX_SAMPLE_ROWS = 20 #TODO
 
 #TODO: pk er reelt surrogate nøgle
-#TODO: find en bedre løsning for alle de astype kald - ligner lort og bliver gjort på data der ligger i en db 
 
 class KeyManager:
     """
