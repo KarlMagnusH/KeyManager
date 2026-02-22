@@ -7,8 +7,8 @@ BK_SEP = "||"
 DEFAULT_PK_VALUE = -1
 DEFAULT_PK_PREFIX = "key" #TODO
 DEFAULT_BK_PREFIX = "bk" #TODO
-MAX_SAMPLE_CONFLICTS = 10 #TODO
-MAX_SAMPLE_ROWS = 20 #TODO
+MAX_SAMPLE_CONFLICTS = 5 #TODO
+MAX_SAMPLE_ROWS = 5 #TODO
 
 #TODO: pk er reelt surrogate nøgle
 
@@ -60,15 +60,22 @@ class KeyManager:
         duplicate_mask = bk_values.duplicated(keep=False)
         
         if duplicate_mask.any():
-            duplicates = bk_values[duplicate_mask].drop_duplicates()
-            duplicate_rows = self.df_incoming_modified[self.df_incoming_modified[self.bk_name].isin(duplicates)]
-            
-            raise ValueError(
-                f"Duplicate business keys found in incoming data for table '{self.table_name}'. "
-                f"Business key column: '{self.bk_name}'. "
-                f"Duplicate values: {duplicates.tolist()[:MAX_SAMPLE_CONFLICTS]}. "
-                f"Sample duplicate rows:\n{duplicate_rows.head(MAX_SAMPLE_ROWS)}"
-            )
+            with pd.option_context(
+                "display.max_rows", MAX_SAMPLE_ROWS,
+                "display.max_columns", None,
+                "display.width", None,
+                "display.max_colwidth", None,
+            ):
+                duplicates = bk_values[duplicate_mask].drop_duplicates()
+                example_dub = duplicates.iloc[0]
+                duplicate_rows = self.df_incoming_modified[self.df_incoming_modified[self.bk_name] == example_dub]
+                
+                raise ValueError(
+                    f"Duplicate business keys found in incoming data for table '{self.table_name}'. "
+                    f"Business key column: '{self.bk_name}'. "
+                    f"Duplicate values: {duplicates}."
+                    f"Sample duplicate rows:\n{duplicate_rows}"
+                )
         
     def _load_existing_keys(self, dim_table: Optional[str] = None, pk_name: Optional[str] = None, bk_name: Optional[str] = None) -> pd.DataFrame:
         """Load existing key pairs from db."""

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Dict, Optional
+from typing import Optional, Self
 import pandas as pd
 from sqlalchemy.engine import Connection
 
@@ -32,7 +32,7 @@ class KeyFact(KeyManager):
         key_condition: Optional[str] = None,
     ):
         super().__init__(table_name, conn, df_incoming, pk_name, bk_name, key_condition)
-        self.dim_mappings: Dict[str, Dict[str, str]] = {}
+        self.dim_mappings: dict[str, dict[str, str]] = {}
 
     def related_dimension(
         self,
