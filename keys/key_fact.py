@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Optional, Self
-import pandas as pd
+import polars as pl
 from sqlalchemy.engine import Connection
 
 from .key_manager import KeyManager
@@ -8,6 +8,7 @@ from .key_manager import (
     DEFAULT_PK_VALUE,
 )
 from .Errors import KeysError, BusinessKeyError, MissingDimensionKeyError
+
 
 class KeyFact(KeyManager):
     """
@@ -27,7 +28,7 @@ class KeyFact(KeyManager):
         self,
         table_name: str,
         conn: Connection,
-        df_incoming: pd.DataFrame,
+        df_incoming: pl.DataFrame,
         pk_name: Optional[str] = None,
         bk_name: Optional[str] = None,
         key_condition: Optional[str] = None,
@@ -41,8 +42,8 @@ class KeyFact(KeyManager):
         bk_name: Optional[str] = None,
         pk_name: Optional[str] = None,
     ) -> "KeyFact":
-        
-        bk_name = bk_name or f"bk_{dim_name}" 
+
+        bk_name = bk_name or f"bk_{dim_name}"
         pk_name = pk_name or f"key_{dim_name}"
 
         self.dim_mappings[dim_name] = {
@@ -63,40 +64,45 @@ class KeyFact(KeyManager):
             return self
         if not self.dim_mappings:
             raise KeysError("Reference to dimension is missing. Either register_dimension or register_all_dimension must be called.")
-        
+
         for dim_name, m in self.dim_mappings.items():
             if m["bk_name"] not in self.df_incoming_modified.columns:
                 raise BusinessKeyError(f"Fact BK column '{m['bk_name']}' missing in incoming dataframe.")
-            
+
             df_pairs = self._load_existing_keys(
                 dim_table=m["dim_table"],
-                pk_name=m["key_name"], 
+                pk_name=m["key_name"],
                 bk_name=m["bk_name"]
             )
             self._merge_keys(df_pairs, m["bk_name"], m["key_name"])
-            
-            missing_mask = self.df_incoming_modified[m["key_name"]].isna()
+
+            missing_mask = self.df_incoming_modified[m["key_name"]].is_null()
             missing_count = missing_mask.sum()
             if fail_on_missing and missing_count > 0:
-                sample_bks = self.df_incoming_modified[missing_mask][m["bk_name"]].head(10)
+                sample_bks = self.df_incoming_modified.filter(missing_mask)[m["bk_name"]].head(10)
                 raise MissingDimensionKeyError(
                     f"Missing dimension keys for {missing_count} rows when mapping "
                     f"{m['bk_name']} -> {m['key_name']} from {m['dim_table']}. "
-                    f"Sample missing BKs:\n{sample_bks.tolist()}"
-                    )
+                    f"Sample missing BKs:\n{sample_bks.to_list()}"
+                )
             else:
-                self.df_incoming_modified.loc[missing_mask, m["key_name"]] = DEFAULT_PK_VALUE
-                
-        #remove bk cols
+                self.df_incoming_modified = self.df_incoming_modified.with_columns(
+                    pl.when(pl.col(m["key_name"]).is_null())
+                    .then(DEFAULT_PK_VALUE)
+                    .otherwise(pl.col(m["key_name"]))
+                    .alias(m["key_name"])
+                )
+
+        # remove bk cols
         bk_cols_to_pop = {m["bk_name"] for m in self.dim_mappings.values()}
-        self.df_incoming_modified = self.df_incoming_modified.drop(columns=bk_cols_to_pop, errors="ignore")
+        self.df_incoming_modified = self.df_incoming_modified.drop(list(bk_cols_to_pop))
         self._processed = True
         return self
 
-    def process(self) -> pd.DataFrame:
+    def process(self) -> pl.DataFrame:
         if self._processed:
             return self.df_incoming_modified
-            
+
         self.df_existing_pk_bk_pair = self._load_existing_keys()
         self._merge_keys(self.df_existing_pk_bk_pair)
 

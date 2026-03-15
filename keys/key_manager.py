@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Optional
-import pandas as pd
+import polars as pl
 from sqlalchemy.engine import Connection
 from .Errors import BusinessKeyError, DatabaseError, MergeError
 
@@ -26,15 +26,15 @@ class KeyManager:
         self,
         table_name: str,
         conn: Connection,
-        df_incoming: pd.DataFrame,
+        df_incoming: pl.DataFrame,
         pk_name: Optional[str] = None,
         bk_name: Optional[str] = None,
-        key_condition:Optional[str] = None,
+        key_condition: Optional[str] = None,
     ):
         self.table_name = table_name
         self.conn = conn
-        self.df_incoming = df_incoming.copy()
-        self.df_incoming_modified = df_incoming.copy()
+        self.df_incoming = df_incoming.clone()
+        self.df_incoming_modified = df_incoming.clone()
         self.pk_name = pk_name or f"key_{table_name}"
         self.bk_name = bk_name or f"bk_{table_name}"
         self.key_condition = key_condition
@@ -46,50 +46,44 @@ class KeyManager:
     def _check_bk_in_incoming_df(self) -> None:
         if self.bk_name not in self.df_incoming.columns:
             raise BusinessKeyError(f"Business key column '{self.bk_name}' not found in incoming dataframe")
-        
+
     def _check_bk_value(self) -> None:
         """
         Checks BK values for:
             1. Not all BK's are None
-            2. No dubplicated BK's
+            2. No duplicated BK's
         """
-        bk_values = self.df_incoming_modified[self.bk_name].dropna()
-        
-        if bk_values.empty:
+        bk_values = self.df_incoming_modified[self.bk_name].drop_nulls()
+
+        if len(bk_values) == 0:
             raise BusinessKeyError(f"No valid business key values found in column '{self.bk_name}'")
-        
-        duplicate_mask = bk_values.duplicated(keep=False)
-        
+
+        duplicate_mask = bk_values.is_duplicated()
+
         if duplicate_mask.any():
-            with pd.option_context(
-                "display.max_rows", MAX_SAMPLE_ROWS,
-                "display.max_columns", None,
-                "display.width", None,
-                "display.max_colwidth", None,
-            ):
-                duplicates = bk_values[duplicate_mask].drop_duplicates()
-                example_dub = duplicates.iloc[0]
-                duplicate_rows = self.df_incoming_modified[self.df_incoming_modified[self.bk_name] == example_dub]
-                
-                raise BusinessKeyError(
-                    f"Duplicate business keys found in incoming data for table '{self.table_name}'. "
-                    f"Business key column: '{self.bk_name}'. "
-                    f"Duplicate values: {duplicates}."
-                    f"Sample duplicate rows:\n{duplicate_rows}"
-                )
-        
-    def _load_existing_keys(self, dim_table: Optional[str] = None, pk_name: Optional[str] = None, bk_name: Optional[str] = None) -> pd.DataFrame:
+            duplicates = bk_values.filter(duplicate_mask).unique()
+            example_dub = duplicates[0]
+            duplicate_rows = self.df_incoming_modified.filter(pl.col(self.bk_name) == example_dub)
+
+            raise BusinessKeyError(
+                f"Duplicate business keys found in incoming data for table '{self.table_name}'. "
+                f"Business key column: '{self.bk_name}'. "
+                f"Duplicate values: {duplicates}."
+                f"Sample duplicate rows:\n{duplicate_rows}"
+            )
+
+    def _load_existing_keys(self, dim_table: Optional[str] = None, pk_name: Optional[str] = None, bk_name: Optional[str] = None) -> pl.DataFrame:
         """Load existing key pairs from db."""
-        bk_name = bk_name or self.bk_name  
+        bk_name = bk_name or self.bk_name
         pk_name = pk_name or self.pk_name
         dim_table = dim_table or self.table_name
-        
+
         query = f"SELECT {bk_name}, {pk_name} FROM {dim_table}"
         if self.key_condition:
             query += " WHERE " + self.key_condition
 
         try:
-            df_existing_pk_bk_pair = pd.read_sql(query, self.conn)
+            df_existing_pk_bk_pair = pl.read_database(query, self.conn)
         except Exception as e:
             raise DatabaseError(f"Failed loading existing key pairs from {dim_table} with bk:{bk_name}, pk:{pk_name}: {e}") from e
 
@@ -99,39 +93,43 @@ class KeyManager:
         """Get maximum existing key value from database."""
         pk_name = pk_name or self.pk_name
         table_name = table_name or self.table_name
-        
+
         query = f"SELECT COALESCE(MAX({pk_name}), 0) as max_key FROM {table_name}"
-        
+
         try:
-            result = pd.read_sql(query, self.conn)
-            return int(result['max_key'].iloc[0])
+            result = pl.read_database(query, self.conn)
+            return int(result['max_key'][0])
         except Exception as e:
             raise DatabaseError(f"Failed getting max key from {table_name}.{pk_name}: {e}") from e
 
     def _assign_new_keys(self) -> None:
         "Assign new pk's for rows missing PK"
-        mask_new = self.df_incoming_modified[self.pk_name].isna()
+        mask_new = self.df_incoming_modified[self.pk_name].is_null()
         if not mask_new.any():
             return
-    
-        needed = mask_new.sum()
-        new_keys = range(self.initial_max_pk + 1, self.initial_max_pk + 1 + needed)
-        self.df_incoming_modified.loc[mask_new, self.pk_name] = list(new_keys)
-        self.df_incoming_modified[self.pk_name] = self.df_incoming_modified[self.pk_name].astype(int)
-        
-    def _merge_keys(self, df_existing_pk_bk_pair: pd.DataFrame, bk_name: Optional[str] = None, pk_name: Optional[str] = None) -> "KeyManager":
+
+        pk_values = self.df_incoming_modified[self.pk_name].to_list()
+        new_key = self.initial_max_pk + 1
+        for i, is_null in enumerate(mask_new):
+            if is_null:
+                pk_values[i] = new_key
+                new_key += 1
+        self.df_incoming_modified = self.df_incoming_modified.with_columns(
+            pl.Series(name=self.pk_name, values=pk_values, dtype=pl.Int64)
+        )
+
+    def _merge_keys(self, df_existing_pk_bk_pair: pl.DataFrame, bk_name: Optional[str] = None, pk_name: Optional[str] = None) -> "KeyManager":
         """Merge dimension keys into incoming dataframe."""
         bk_name = bk_name or self.bk_name
         pk_name = pk_name or self.pk_name
-        
-        self.df_incoming_modified = self.df_incoming_modified.merge(
+
+        self.df_incoming_modified = self.df_incoming_modified.join(
             df_existing_pk_bk_pair,
             on=bk_name,
             how="left",
         )
-        
+
         if len(self.df_incoming_modified) > self._initial_length_incoming_df:
             raise MergeError(f"Row count changed after merge - possible duplicate keys in {self.table_name}")
-        
-        return self
 
+        return self
