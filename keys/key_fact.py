@@ -7,6 +7,7 @@ from .key_manager import KeyManager
 from .key_manager import (
     DEFAULT_PK_VALUE,
 )
+from .Errors import KeysError, BusinessKeyError, MissingDimensionKeyError
 
 class KeyFact(KeyManager):
     """
@@ -61,11 +62,11 @@ class KeyFact(KeyManager):
         if self._processed == True:
             return self
         if not self.dim_mappings:
-            raise RuntimeError("Reference to dimension is missing. Either register_dimension or register_all_dimension must be called.")
+            raise KeysError("Reference to dimension is missing. Either register_dimension or register_all_dimension must be called.")
         
         for dim_name, m in self.dim_mappings.items():
             if m["bk_name"] not in self.df_incoming_modified.columns:
-                raise ValueError(f"Fact BK column '{m['bk_name']}' missing in incoming dataframe.")
+                raise BusinessKeyError(f"Fact BK column '{m['bk_name']}' missing in incoming dataframe.")
             
             df_pairs = self._load_existing_keys(
                 dim_table=m["dim_table"],
@@ -78,7 +79,7 @@ class KeyFact(KeyManager):
             missing_count = missing_mask.sum()
             if fail_on_missing and missing_count > 0:
                 sample_bks = self.df_incoming_modified[missing_mask][m["bk_name"]].head(10)
-                raise ValueError(
+                raise MissingDimensionKeyError(
                     f"Missing dimension keys for {missing_count} rows when mapping "
                     f"{m['bk_name']} -> {m['key_name']} from {m['dim_table']}. "
                     f"Sample missing BKs:\n{sample_bks.tolist()}"

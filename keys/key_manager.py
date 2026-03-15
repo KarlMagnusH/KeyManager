@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import Optional
 import pandas as pd
 from sqlalchemy.engine import Connection
+from .Errors import BusinessKeyError, DatabaseError, MergeError
 
 BK_SEP = "||"
 DEFAULT_PK_VALUE = -1
@@ -44,7 +45,7 @@ class KeyManager:
 
     def _check_bk_in_incoming_df(self) -> None:
         if self.bk_name not in self.df_incoming.columns:
-            raise ValueError(f"Business key column '{self.bk_name}' not found in incoming dataframe")
+            raise BusinessKeyError(f"Business key column '{self.bk_name}' not found in incoming dataframe")
         
     def _check_bk_value(self) -> None:
         """
@@ -55,7 +56,7 @@ class KeyManager:
         bk_values = self.df_incoming_modified[self.bk_name].dropna()
         
         if bk_values.empty:
-            raise ValueError(f"No valid business key values found in column '{self.bk_name}'")
+            raise BusinessKeyError(f"No valid business key values found in column '{self.bk_name}'")
         
         duplicate_mask = bk_values.duplicated(keep=False)
         
@@ -70,7 +71,7 @@ class KeyManager:
                 example_dub = duplicates.iloc[0]
                 duplicate_rows = self.df_incoming_modified[self.df_incoming_modified[self.bk_name] == example_dub]
                 
-                raise ValueError(
+                raise BusinessKeyError(
                     f"Duplicate business keys found in incoming data for table '{self.table_name}'. "
                     f"Business key column: '{self.bk_name}'. "
                     f"Duplicate values: {duplicates}."
@@ -85,12 +86,12 @@ class KeyManager:
         
         query = f"SELECT {bk_name}, {pk_name} FROM {dim_table}"
         if self.key_condition:
-            query + "WHERE" + self.key_condition
+            query += " WHERE " + self.key_condition
 
         try:
             df_existing_pk_bk_pair = pd.read_sql(query, self.conn)
         except Exception as e:
-            raise RuntimeError(f"Failed loading existing key pairs from {dim_table} with bk:{bk_name}, pk:{pk_name}: {e}") from e
+            raise DatabaseError(f"Failed loading existing key pairs from {dim_table} with bk:{bk_name}, pk:{pk_name}: {e}") from e
 
         return df_existing_pk_bk_pair
 
@@ -105,7 +106,7 @@ class KeyManager:
             result = pd.read_sql(query, self.conn)
             return int(result['max_key'].iloc[0])
         except Exception as e:
-            raise RuntimeError(f"Failed getting max key from {table_name}.{pk_name}: {e}") from e
+            raise DatabaseError(f"Failed getting max key from {table_name}.{pk_name}: {e}") from e
 
     def _assign_new_keys(self) -> None:
         "Assign new pk's for rows missing PK"
@@ -130,7 +131,7 @@ class KeyManager:
         )
         
         if len(self.df_incoming_modified) > self._initial_length_incoming_df:
-            raise ValueError(f"Row count changed after merge - possible duplicate keys in {self.table_name}")
+            raise MergeError(f"Row count changed after merge - possible duplicate keys in {self.table_name}")
         
         return self
 

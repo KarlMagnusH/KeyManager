@@ -1,3 +1,14 @@
-#from pprint import pprint
-#TODO: implement costum Erros.
-# - ValueError for printing dataframes - usecase is for the check in keyManager where it prints a dataframe which is choped when printed as a string which is the default way
+class KeysError(Exception):
+    """Base class for all keys library errors."""
+
+class BusinessKeyError(KeysError):
+    """Raised when a business key column is missing, empty, or has duplicates."""
+
+class DatabaseError(KeysError):
+    """Raised when a database query fails."""
+
+class MissingDimensionKeyError(KeysError):
+    """Raised when fact rows reference BKs with no matching dimension key."""
+
+class MergeError(KeysError):
+    """Raised when a merge changes the row count unexpectedly."""
