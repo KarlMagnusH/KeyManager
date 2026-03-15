@@ -7,5 +7,5 @@ __all__ = [
     "KeyManager",
     "KeyDimension", 
     "KeyFact",
-    "set_business_key"
+    "add_bk_for_table"
 ]
