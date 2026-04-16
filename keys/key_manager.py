@@ -108,14 +108,11 @@ class KeyManager:
         if not mask_new.any():
             return
 
-        pk_values = self.df_incoming_modified[self.pk_name].to_list()
-        new_key = self.initial_max_pk + 1
-        for i, is_null in enumerate(mask_new):
-            if is_null:
-                pk_values[i] = new_key
-                new_key += 1
         self.df_incoming_modified = self.df_incoming_modified.with_columns(
-            pl.Series(name=self.pk_name, values=pk_values, dtype=pl.Int64)
+            pl.when(pl.col(self.pk_name).is_null())
+            .then(self.initial_max_pk + pl.col(self.pk_name).is_null().cast(pl.Int64).cum_sum())
+            .otherwise(pl.col(self.pk_name).cast(pl.Int64))
+            .alias(self.pk_name)
         )
 
     def _merge_keys(self, df_existing_pk_bk_pair: pl.DataFrame, bk_name: Optional[str] = None, pk_name: Optional[str] = None) -> "KeyManager":
